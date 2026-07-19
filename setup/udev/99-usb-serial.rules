@@ -1,0 +1,8 @@
+# STM32 baseboard (CH340, USB-pad 3-1.3) → /dev/myserial
+SUBSYSTEM=="tty", KERNELS=="3-1.3", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="myserial", MODE="0666"
+
+# YDLidar TG30 (CP210x Silicon Labs, USB-pad 1-1) → /dev/mylidar
+SUBSYSTEM=="tty", KERNELS=="1-1", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="mylidar", MODE="0666"
+
+# Voice wake module (CH340, nog te bepalen USB-pad) → /dev/myspeech
+# SUBSYSTEM=="tty", KERNELS=="?-?.?", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="myspeech", MODE="0666"
