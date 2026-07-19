@@ -1,0 +1,15 @@
+<!-- D:\cyclone_dds.xml — voor WSL2 mirrored networking (optioneel) -->
+<!-- Zie setup/WINDOWS_SETUP.md voor WSL2 netwerk configuratie -->
+<CycloneDDS>
+  <Domain>
+    <General>
+      <NetworkInterfaceAddress>auto</NetworkInterfaceAddress>
+    </General>
+    <Discovery>
+      <Peers>
+        <Peer Address="192.168.68.88"/>
+        <Peer Address="192.168.68.86"/>
+      </Peers>
+    </Discovery>
+  </Domain>
+</CycloneDDS>
