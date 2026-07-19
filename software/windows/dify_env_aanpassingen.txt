@@ -1,0 +1,13 @@
+# === MUTO RS AANPASSINGEN in D:\dify\docker\.env ===
+#
+# Voeg deze regel toe aan .env om de Pi bereikbaar te maken vanuit Dify:
+SSRF_PROXY_ALLOW_PRIVATE_IPS=192.168.68.88
+
+# Dify installatie locatie: D:\dify\docker  (NOOIT C:\Windows\system32)
+#
+# Opstarten:
+#   cd D:\dify\docker
+#   docker compose up -d
+#
+# Na restart: docker compose restart nginx  (wacht 10s)
+# Studio: http://localhost/apps
