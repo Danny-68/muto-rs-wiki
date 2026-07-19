@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CycloneDDS>
+  <Domain>
+    <Discovery>
+      <Peers>
+        <Peer address="192.168.68.88"/>
+        <Peer address="192.168.68.86"/>
+      </Peers>
+      <ParticipantIndex>auto</ParticipantIndex>
+    </Discovery>
+    <General>
+      <Interfaces>
+        <NetworkInterface name="wlan0" priority="default" multicast="false"/>
+      </Interfaces>
+    </General>
+  </Domain>
+</CycloneDDS>
