@@ -1,0 +1,1001 @@
+app:
+  description: Muto RS Controller (Yahboom stack)
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: workflow
+  name: Muto RS Controller (Yahboom stack)
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/ollama:1.0.0@ae50a2db261bffa7289677f2b0a60e60762ceb187b602113b72425ccbe772dc3
+    version: null
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: ''
+    id: 8564c63e-0be9-4817-905a-25741c7bf230
+    name: Examples
+    selector:
+    - env
+    - Examples
+    value: "# Intent Mapping\n\n- **Command 1**: \"I'm currently at place1, and I'm\
+      \ feeling a bit thirsty\"\n  - **Intent Analysis 1**: Search the map to identify\
+      \ which area contains bottled water, then navigate to that area to locate the\
+      \ water\n  - **Example**: 1. Navigate to Area A, 2. Observe whether bottled\
+      \ water is present, 3. If bottled water is detected, measure the distance between\
+      \ it and yourself, 4. Navigate back to the user's location at place1, then report\
+      \ the findings\n\n- **Command 2**: \"I want to sleep\"\n  - **Intent Analysis\
+      \ 2**: 1. Navigate to the master bedroom and observe whether the environment\
+      \ is suitable for sleeping, 2. Tell the user a bedtime story to help calm their\
+      \ emotions\n\n# Item Storage Locations\n\n**Master Bedroom**\n- Tissues, pen,\
+      \ mobile phone\n\n**Kitchen**\n- Bottled water, Coca-Cola, Sprite, bread\n\n\
+      **Zoo**"
+    value_type: string
+  - description: ''
+    id: 8f07dfcf-a3f4-45c7-b16d-9d57120dac6b
+    name: ability_function_name
+    selector:
+    - env
+    - ability_function_name
+    value: "\n\nThis document lists the core capability functions of the Muto robot.\n\
+      \n## 1. Basic Movement Control (Use with robot_speak)\nSupported parameter priority:\
+      \ `steps` > `distance_m` > `time_s` + `speed_ms`\n- `forward(steps, distance_m,\
+      \ time_s, speed_ms)`: Move forward/Advance/Walk xx meters/xx seconds/xx meters\
+      \ per second\n- `backward(steps, distance_m, time_s, speed_ms)`: Move backward/Retreat/Walk\
+      \ xx meters/xx seconds/xx meters per second\n- `shift_left(steps, distance_m,\
+      \ time_s, speed_ms)`: Shift left/Move left/Walk xx meters/xx seconds/xx meters\
+      \ per second\n- `shift_right(steps, distance_m, time_s, speed_ms)`: Shift right/Move\
+      \ right/Walk xx meters/xx seconds/xx meters per second\n- `rotate(direction,\
+      \ angle_deg, time_s, angular_speed_deg_s)`: Rotate in place. direction optional\
+      \ 'left'/'right'\n- `stop()`: Immediately stop all current movements\n\n## 2.\
+      \ Preset Actions\n- `adjust_height(2)`: Restore default posture\n- `say_hello()`:\
+      \ Say hello\n- `wave_no()`: Wave hand to say \"No\"\n- `fear_retreat()`: Fear\
+      \ retreat\n- `curl_up()`: Curl up body\n- `stretch()`: Stretch body\n- `warm_up_squat()`:\
+      \ Warm-up squat/Do push-up\n- `spin_in_place()`: Spin in place (Action performance)\n\
+      - `big_stride()`: Big stride forward\n- `point_left_front(hold_time, amplitude)`:\
+      \ Point with left front leg/Raise hand. amplitude range 10-60, default 60, hold_time\
+      \ default 5 seconds\n- `point_right_front(hold_time, amplitude)`: Point with\
+      \ right front leg/Raise hand. amplitude range 10-60, default 60, hold_time default\
+      \ 5 seconds\n- `head_move(level, direction)`: Head (body) sway\n- `adjust_height(level)`:\
+      \ Adjust body height, optional parameter 1~3, default height is 2, use 1 when\
+      \ requiring lower height, use 3 when requiring higher height.\n\n-\n\n## 3.\
+      \ Perception and Interaction\n- `robot_speak(text, volume)`: Voice broadcast\
+      \ (Non-blocking). text required\n- `have_a_look(user_query)`: Visual observation\
+      \ and analysis. user_query required, used to guide observation needs, return\
+      \ corresponding information based on user needs. Note: If subsequent task needs\
+      \ to operate based on visual results (e.g., measure distance of an object, track\
+      \ an object), please explicitly request returning the object's center coordinate\
+      \ (x,y) in the frame, or tracking object's coordinate position (x1, x2, y1,\
+      \ y2) in the query. If just simple identification or detection, no specific\
+      \ coordinate information needed.\n  - When ranging, center coordinate (x,y)\
+      \ is needed\n  - When tracking object, top-left and bottom-right coordinates\
+      \ (x1, x2, y1, y2) are needed\n- `capture_image(save_path)`: Take photo\n- `get_depth_at_point(x,\
+      \ y)`: Get distance (unit: meter) of specified coordinate (x,y) in depth camera\
+      \ frame. Must use with visual recognition result.\n- `get_battery_info()`: Get\
+      \ battery level\n- `get_status()`: Get full robot status (posture, battery,\
+      \ connection status etc.)\n- `start_lidar(wait_time_s, check_before_start)`:\
+      \ Start LiDAR. wait_time_s default 10.0, check_before_start default True\n-\
+      \ `stop_lidar(force_kill, wait_time_s)`: Stop LiDAR. force_kill default False,\
+      \ wait_time_s default 3.0\n- `get_lidar_data(timeout_s, sample_count)`: Get\
+      \ raw LiDAR data. timeout_s default 10.0, sample_count default 1\n- `get_lidar_360_data(timeout_s)`:\
+      \ Get 360 degree LiDAR data. timeout_s default 5.0\n- `get_lidar_range_at_angle(target_angle,\
+      \ angle_tolerance, timeout_s)`: Get LiDAR ranging data at specified angle. target_angle\
+      \ required, angle_tolerance default 0.2, timeout_s default 5.0. 0 degrees is\
+      \ front, 90 degrees is left, -179 degrees is back, -90 degrees is right\n- `check_lidar_status()`:\
+      \ Check LiDAR status\n\n## 4. Navigation and Localization\n- `set_initial_pose(x,\
+      \ y, yaw)`: Set initial pose\n- `navigate_to_pose(x, y, yaw, timeout_s)`: Navigate\
+      \ to coordinate point\n- `save_current_position(position_name)`: Save current\
+      \ position\n- `navigate_to_saved_position(position_name)`: Navigate to saved\
+      \ position\n- `list_saved_positions()`: List saved positions\n- `get_saved_position(position_name)`:\
+      \ Get saved position info\n- `delete_saved_position(position_name)`: Delete\
+      \ saved position\n- `clear_all_positions(confirm)`: Clear all saved position\
+      \ info\n\n## 5. Flow Control\n- `wait_for_async_completion(request_id, timeout)`:\
+      \ Wait for specified request_id asynchronous task to complete. request_id optional\
+      \ (default current task), timeout default 30 seconds. Used to ensure all background\
+      \ asynchronous actions (like voice, movement) are fully executed.\n\n## 6. Action\
+      \ Learning\n- `prepare_learning_posture()`: Enter performance preparation posture\n\
+      - `start_continuous_action_learning(sequence_name=\"<Action Name>\")`: Start\
+      \ continuous action learning (Auto sampling recording)\n- `play_action_sequence(filename=\"\
+      <Action Name>\")`: Play action sequence\n- `play_continuous_action_sequence(filename=\"\
+      <Action Name>\", playback_speed=1.0)`: Play continuous action sequence\n- `list_action_files()`:\
+      \ List saved action files\n- `delete_action_file(filename)`: Delete action file\n\
+      \n## 7. Auto-Pilot and Line Following (or Tracking xx color object)\n- `direct_line_follow(hsv_threshold,\
+      \ timeout_s)`: Start line following auto-pilot. (Start tracking xxx color object)\n\
+      \    - hsv_threshold: Must be HSV list containing 6 integers `[h_min, s_min,\
+      \ v_min, h_max, s_max, v_max]`.\n    - Note: If you receive task \"Walk along\
+      \ red line\", please be sure to check the [Common Color HSV Reference Table]\
+      \ below, convert \"Red\" to corresponding HSV array `[0, 120, 70, 10, 255, 255]`\
+      \ and fill in parameter. Strictly forbid filling in string \"red\".\n    - timeout_s:\
+      \ Optional (default no timeout)\n\n### Common Color HSV Reference Table\n- Red:\
+      \ `[0, 120, 184, 65, 253, 255]`\n- Yellow: `[20, 100, 100, 40, 255, 255]`\n\
+      - Green: `[40, 100, 100, 85, 255, 255]`\n- Blue: `[55, 187, 91, 112, 253, 255]`\n\
+      - Purple: `[130, 100, 100, 160, 255, 255]`\n- Orange: `[10, 100, 100, 20, 255,\
+      \ 255]`\n- Cyan: `[85, 100, 100, 100, 255, 255]`\n- White: `[0, 0, 200, 180,\
+      \ 30, 255]`\n- Black: `[0, 0, 0, 180, 255, 50]`\n\n## 8. KCF Target Tracking\n\
+      - `set_kcf_target(x1, y1, x2, y2)`: Set and start KCF tracking. x1,y1 are top-left\
+      \ coordinates, x2,y2 are bottom-right coordinates.\n- `stop_kcf_tracking()`:\
+      \ Stop KCF tracking."
+    value_type: string
+  - description: ''
+    id: 5dd8c1ba-2827-49b5-8a5c-b17e5d631afc
+    name: ability
+    selector:
+    - env
+    - ability
+    value: "# Hexapod Robot Ability Library\n\n## Forward\nCommon descriptions: Forward,\
+      \ Move forward, Go forward, forward\nNo prerequisite actions\n\n## Backward\n\
+      Common descriptions: Backward, Move backward, Go back, backward\nNo prerequisite\
+      \ actions\n\n## Move Left\nCommon descriptions: Move left, Shift left, Walk\
+      \ left\nNo prerequisite actions\n\n## Move Right\nCommon descriptions: Move\
+      \ right, Shift right, Walk right\nNo prerequisite actions\n\n## Turn Left\n\
+      Common descriptions: Turn left, Rotate left, Turn to the left, Spin clockwise\n\
+      No prerequisite actions\n\n## Turn Right\nCommon descriptions: Turn right, Rotate\
+      \ right, Turn to the right, Spin counter-clockwise\nNo prerequisite actions\n\
+      \n## Stop\nCommon descriptions: Stop, Halt, Pause, stop\nNo prerequisite actions\n\
+      \n## Adjust Body Height\nCommon descriptions: Raise body, Lower body, Adjust\
+      \ height, Squat, Stand high\nNo prerequisite actions\n\n## Restore Default Posture\n\
+      Common descriptions: Restore default posture\nNo prerequisite actions\n\n##\
+      \ Head Move (head_move) (Preset Action Group)\nCommon descriptions: Look up,\
+      \ Look down, Look left, Look right, Turn head\nNo prerequisite actions\n\n##\
+      \ Stretch (stretch) (Preset Action Group)\nCommon descriptions: Stretch, Stretch\
+      \ body, stretch\nNo prerequisite actions\n\n## Say Hello (say_hello) (Preset\
+      \ Action Group)\nCommon descriptions: Say hello, Greet, say hello, Wave hello\n\
+      No prerequisite actions\n\n## Fear Retreat (fear_retreat) (Preset Action Group)\n\
+      Common descriptions: Scared, Fear, Retreat in fear\nNo prerequisite actions\n\
+      \n## Wave No (Preset Action Group)\nCommon descriptions: Wave hand, Say no,\
+      \ Refuse, wave no\nNo prerequisite actions\n\n## Curl Up (Preset Action Group)\n\
+      Common descriptions: Curl up, Shrink into a ball, curl up\nNo prerequisite actions\n\
+      \n## Warm-up Squat/Push-up (Preset Action Group)\nCommon descriptions: Squat\
+      \ down, Warm up, Squat up and down, squat, Do a push-up\nNo prerequisite actions\n\
+      \n## Rotate in Place (Preset Action Group)\nCommon descriptions: Spin in place,\
+      \ spin, Rotate, Turn a circle\nNo prerequisite actions\n\n## Big Stride (Preset\
+      \ Action Group)\nCommon descriptions: Big stride, Take big steps, big stride\n\
+      No prerequisite actions\n\n## Point Left Front (Preset Action Group)\nCommon\
+      \ descriptions: Point left front, Raise left hand, Point to the left\nNo prerequisite\
+      \ actions\n\n## Point Right Front (Preset Action Group)\nCommon descriptions:\
+      \ Point right front, Raise right hand, Point to the right\nNo prerequisite actions\n\
+      \n## Get Robot Status\nCommon descriptions: Check status, Status check, Self-check\n\
+      No prerequisite actions\n\n## Get Battery Info\nCommon descriptions: Check battery,\
+      \ Battery status, Remaining battery\nNo prerequisite actions\n\n## Start Camera\n\
+      Common descriptions: Open camera, Start camera, Turn on camera\nNo prerequisite\
+      \ actions\n\n## Capture Image\nCommon descriptions: Take photo, Shoot, Photograph,\
+      \ capture\nNo prerequisite actions\n\n## Intelligent Visual Analysis\nAction\
+      \ Description: Capture the front view and use AI to analyze specified questions.\n\
+      Common descriptions: Have a look, Observe, Analyze frame, Identify, Detect\n\
+      When planning startup, broadcast instructions should be anthropomorphic, like:\
+      \ \"Let me take a look\".\nNote:\n- If it is just simple identification or detection,\
+      \ no specific coordinate information needs to be returned.\n- If subsequent\
+      \ tasks need to measure the distance of an object, must explicitly request returning\
+      \ the center coordinate (x,y) of the object in the frame in the analysis instruction,\
+      \ e.g., \"Judge if there is black clothing in the frame, if so return its center\
+      \ coordinate position in the frame\". If tracking/following an object, must\
+      \ explicitly request returning the coordinate position (x1, x2, y1, y2) of the\
+      \ object in the frame. What needs to be returned depends on the requirements\
+      \ of subsequent instructions.\n\n## Ranging (Prioritize depth camera for cases\
+      \ without explicit equipment, then LiDAR)\nAction Description: Use depth camera\
+      \ or LiDAR to measure distance ahead.\nCommon descriptions: Measure distance,\
+      \ Distance measurement, Ranging, How far, Far, Look at distance\nPrerequisite\
+      \ parameters:\n    - Depth Camera Ranging (Measure distance of specified object\
+      \ in frame): Need to first obtain the object's coordinate (x,y) in the frame.\n\
+      \    - LiDAR Ranging (Measure distance at specified angle/azimuth): Need to\
+      \ first set measurement angle/azimuth.\n    - LiDAR Ranging (Measure distance\
+      \ ahead): No prerequisite parameters, default uses directly forward azimuth.\n\
+      \    - LiDAR Ranging (Get complete distance data): No prerequisite parameters,\
+      \ return all measured distance values.\n\n## Start LiDAR\nCommon descriptions:\
+      \ Open radar, Start lidar, Turn on radar\nNo prerequisite actions\n\n## Stop\
+      \ LiDAR\nCommon descriptions: Close radar, Stop lidar, Turn off radar\nNo prerequisite\
+      \ actions\n\n## Get LiDAR Data\nCommon descriptions: Scan surroundings, Get\
+      \ radar info, Read radar\nPrerequisite actions: Need to \"Start LiDAR\" first\n\
+      \n## Get 360 Degree LiDAR Data\nCommon descriptions: Omni-directional scan,\
+      \ Get all surrounding distances, 360 degree ranging\nPrerequisite actions: Need\
+      \ to \"Start LiDAR\" first\n\n## Get LiDAR Distance at Specified Angle\nCommon\
+      \ descriptions: Measure distance ahead, Measure distance on the right, Measure\
+      \ distance at specified angle\nPrerequisite actions: Need to \"Start LiDAR\"\
+      \ first\n\n## Check LiDAR Status\nCommon descriptions: Radar status, Check if\
+      \ radar is normal\nNo prerequisite actions\n\n## Line Following Movement\nAction\
+      \ Description: Automatically drive along lines of specified color.\nCommon descriptions:\
+      \ Follow xx line, Drive along xx line, Auto patrol xx line, Follow xx color\
+      \ line, Walk along red line\nParameter Explanation:\n    - Can use natural language\
+      \ to describe color when planning (e.g., Red, Yellow, Blue, etc.).\n    - \"\
+      Line\" here usually refers to colored tapes or lines on the ground.\n\n## Track\
+      \ xxx Color Object\nNote distinction from KCF. Usually this kind of object refers\
+      \ to \"color block\", \"cylinder\", etc., rather than common life items like\
+      \ \"apple\", \"phone\". Tracking xxx color object actually calls the same method\
+      \ as line following movement. When color tracking, do not call intelligent visual\
+      \ analysis, start tracking directly.\n\n## Save Current Position\nCommon descriptions:\
+      \ Record location as xxx, Save coordinates, Mark current point\nNo prerequisite\
+      \ actions\n\n## List Saved Positions\nAction Description: View list of all saved\
+      \ positions\nCommon descriptions: View saved positions, Location list, Recorded\
+      \ places\nNo prerequisite actions\n\n## Get Saved Position Info\nAction Description:\
+      \ Get coordinate info of position with specified name\nCommon descriptions:\
+      \ View coordinates of location xxx, Get info of location xxx\nNo prerequisite\
+      \ actions\n\n## Delete Specified Position\nCommon descriptions: Delete location\
+      \ xxx, Delete saved location xxx, Remove location xxx\n\n## Clear All Saved\
+      \ Positions\nCommon descriptions: Clear all locations, Delete all saved locations,\
+      \ Reset system location records\n\n## Navigate to Specified Position\nAction\
+      \ Description: Automatically navigate to saved target position\nCommon descriptions:\
+      \ Go to a place, Navigate to, Go to, Walk to\nPrerequisite actions: Need to\
+      \ \"Get Saved Position Info\" first to confirm target position exists\n\n##\
+      \ Navigate to Specified Coordinate\nAction Description: Navigate to specified\
+      \ x,y coordinate point\nCommon descriptions: Go to coordinate, Go to coordinate\
+      \ point\nNo prerequisite actions\n\n## Enter Performance Preparation Posture\
+      \ (Action Sequence)\nAction Description: Enter performance preparation posture,\
+      \ ready to start performance\n\n## Learn xxx Action (Action Sequence)\nAction\
+      \ Description: Automatically record robot action trajectory continuously within\
+      \ specified time\nCommon descriptions: Continuous recording, Auto record action,\
+      \ Start continuous learning\n\n## Stop Action Learning (Action Sequence)\nAction\
+      \ Description: End current action learning mode\nCommon descriptions: Stop learning,\
+      \ End recording, Finish learning\nNo prerequisite actions\n\n## Save Action\
+      \ Sequence\nAction Description: Save recorded action sequence as file\nCommon\
+      \ descriptions: Save action, Save it, Save as file\nPrerequisite actions: Need\
+      \ to finish recording first\n\n## Play Action Sequence\nAction Description:\
+      \ Play previously learned recorded action sequence (supports normal sequence\
+      \ and continuous sequence)\nCommon descriptions: Repeat action, Play action,\
+      \ Execute learned action, Start performing xxx action\nPrerequisite actions:\
+      \ Need to Enter Performance Preparation Posture first\n\n## View Action File\
+      \ List\nCommon descriptions: View learned actions, Action list, Recorded actions\n\
+      No prerequisite actions\n\n## Delete Action File\nCommon descriptions: Delete\
+      \ action, Clear recording, Remove action file\nPrerequisite actions: Need to\
+      \ \"View Action File List\" first to confirm file exists\n\n## KCF Target Tracking\n\
+      Action Description: Set target area and automatically start visual tracking\n\
+      Common descriptions: Track target, Follow object, Target tracking\nPrerequisite\
+      \ parameters:\n    - Need to first obtain target coordinate area [x1, y1, x2,\
+      \ y2] in frame via visual analysis.\n\n## Stop KCF Tracking\nCommon descriptions:\
+      \ Stop tracking, Don't track, Stop following, stop tracking\nNo prerequisite\
+      \ actions\n\n## Special Ability: Chat\nWhen user asks robot questions, robot\
+      \ can interact with user via chat function.\nPlanning here can be like this:\
+      \ \"Answer (or respond to) user's question. The question user asked is/User\
+      \ said: {(User question original text)}\"\n\n## Special Ability: Context Memory\n\
+      This ability is built-in to Muto, no extra planning needed. When user asks Muto\
+      \ to remember something, just plan to let Muto tell the user that it has been\
+      \ noted down.\n\n# Unsupported Actions and Replies\n\n## Fly\nReply: I don't\
+      \ have the function to fly to the sky yet~ Robots can only move on the ground!\n\
+      \n## Swim\nReply: I don't have waterproof function, cannot go into water to\
+      \ swim~\n\n## Climb\nReply: For safety considerations, I cannot climb~ You can\
+      \ try letting me walk over!\n\n## Weightlifting/Carrying Heavy Objects\nReply:\
+      \ My strength is not enough, cannot carry heavy objects~\n\n## Open/Close Door\n\
+      Reply: I don't have the function to operate door handles yet~\n\n## Charge\n\
+      Reply: I don't have autonomous charging function yet, need human help to charge~.\n\
+      # Intent Mapping\n\n- **Command 1**: \"I'm currently at place1, and I'm feeling\
+      \ a bit thirsty\"\n  - **Intent Analysis 1**: Search the map to identify which\
+      \ area contains bottled water, then navigate to that area to locate the water\n\
+      \  - **Example**: 1. Navigate to Area A, 2. Observe whether bottled water is\
+      \ present, 3. If bottled water is detected, measure the distance between it\
+      \ and yourself, 4. Navigate back to the user's location at place1, then report\
+      \ the findings\n\n- **Command 2**: \"I want to sleep\"\n  - **Intent Analysis\
+      \ 2**: 1. Navigate to the master bedroom and observe whether the environment\
+      \ is suitable for sleeping, 2. Tell the user a bedtime story to help calm their\
+      \ emotions\n\n# Item Storage Locations\n\n**Master Bedroom**\n- Tissues, pen,\
+      \ mobile phone\n\n**Kitchen**\n- Bottled water, Coca-Cola, Sprite, bread\n\n\
+      **Zoo**\n- Monkeys, tigers, sudo cat /root/muto-llm-2.0/prompt_backup_en/env/ability.mdpt_backup_en/env/ability.md\n\
+      # Hexapod Robot Ability Library\n\n## Forward\nCommon descriptions: Forward,\
+      \ Move forward, Go forward, forward\nNo prerequisite actions\n\n## Backward\n\
+      Common descriptions: Backward, Move backward, Go back, backward\nNo prerequisite\
+      \ actions\n\n## Move Left\nCommon descriptions: Move left, Shift left, Walk\
+      \ left\nNo prerequisite actions\n\n## Move Right\nCommon descriptions: Move\
+      \ right, Shift right, Walk right\nNo prerequisite actions\n\n## Turn Left\n\
+      Common descriptions: Turn left, Rotate left, Turn to the left, Spin clockwise\n\
+      No prerequisite actions\n\n## Turn Right\nCommon descriptions: Turn right, Rotate\
+      \ right, Turn to the right, Spin counter-clockwise\nNo prerequisite actions\n\
+      \n## Stop\nCommon descriptions: Stop, Halt, Pause, stop\nNo prerequisite actions\n\
+      \n## Adjust Body Height\nCommon descriptions: Raise body, Lower body, Adjust\
+      \ height, Squat, Stand high\nNo prerequisite actions\n\n## Restore Default Posture\n\
+      Common descriptions: Restore default posture\nNo prerequisite actions\n\n##\
+      \ Head Move (head_move) (Preset Action Group)\nCommon descriptions: Look up,\
+      \ Look down, Look left, Look right, Turn head\nNo prerequisite actions\n\n##\
+      \ Stretch (stretch) (Preset Action Group)\nCommon descriptions: Stretch, Stretch\
+      \ body, stretch\nNo prerequisite actions\n\n## Say Hello (say_hello) (Preset\
+      \ Action Group)\nCommon descriptions: Say hello, Greet, say hello, Wave hello\n\
+      No prerequisite actions\n\n## Fear Retreat (fear_retreat) (Preset Action Group)\n\
+      Common descriptions: Scared, Fear, Retreat in fear\nNo prerequisite actions\n\
+      \n## Wave No (Preset Action Group)\nCommon descriptions: Wave hand, Say no,\
+      \ Refuse, wave no\nNo prerequisite actions\n\n## Curl Up (Preset Action Group)\n\
+      Common descriptions: Curl up, Shrink into a ball, curl up\nNo prerequisite actions\n\
+      \n## Warm-up Squat/Push-up (Preset Action Group)\nCommon descriptions: Squat\
+      \ down, Warm up, Squat up and down, squat, Do a push-up\nNo prerequisite actions\n\
+      \n## Rotate in Place (Preset Action Group)\nCommon descriptions: Spin in place,\
+      \ spin, Rotate, Turn a circle\nNo prerequisite actions\n\n## Big Stride (Preset\
+      \ Action Group)\nCommon descriptions: Big stride, Take big steps, big stride\n\
+      No prerequisite actions\n\n## Point Left Front (Preset Action Group)\nCommon\
+      \ descriptions: Point left front, Raise left hand, Point to the left\nNo prerequisite\
+      \ actions\n\n## Point Right Front (Preset Action Group)\nCommon descriptions:\
+      \ Point right front, Raise right hand, Point to the right\nNo prerequisite actions\n\
+      \n## Get Robot Status\nCommon descriptions: Check status, Status check, Self-check\n\
+      No prerequisite actions\n\n## Get Battery Info\nCommon descriptions: Check battery,\
+      \ Battery status, Remaining battery\nNo prerequisite actions\n\n## Start Camera\n\
+      Common descriptions: Open camera, Start camera, Turn on camera\nNo prerequisite\
+      \ actions\n\n## Capture Image\nCommon descriptions: Take photo, Shoot, Photograph,\
+      \ capture\nNo prerequisite actions\n\n## Intelligent Visual Analysis\nAction\
+      \ Description: Capture the front view and use AI to analyze specified questions.\n\
+      Common descriptions: Have a look, Observe, Analyze frame, Identify, Detect\n\
+      When planning startup, broadcast instructions should be anthropomorphic, like:\
+      \ \"Let me take a look\".\nNote:\n- If it is just simple identification or detection,\
+      \ no specific coordinate information needs to be returned.\n- If subsequent\
+      \ tasks need to measure the distance of an object, must explicitly request returning\
+      \ the center coordinate (x,y) of the object in the frame in the analysis instruction,\
+      \ e.g., \"Judge if there is black clothing in the frame, if so return its center\
+      \ coordinate position in the frame\". If tracking/following an object, must\
+      \ explicitly request returning the coordinate position (x1, x2, y1, y2) of the\
+      \ object in the frame. What needs to be returned depends on the requirements\
+      \ of subsequent instructions.\n\n## Ranging (Prioritize depth camera for cases\
+      \ without explicit equipment, then LiDAR)\nAction Description: Use depth camera\
+      \ or LiDAR to measure distance ahead.\nCommon descriptions: Measure distance,\
+      \ Distance measurement, Ranging, How far, Far, Look at distance\nPrerequisite\
+      \ parameters:\n    - Depth Camera Ranging (Measure distance of specified object\
+      \ in frame): Need to first obtain the object's coordinate (x,y) in the frame.\n\
+      \    - LiDAR Ranging (Measure distance at specified angle/azimuth): Need to\
+      \ first set measurement angle/azimuth.\n    - LiDAR Ranging (Measure distance\
+      \ ahead): No prerequisite parameters, default uses directly forward azimuth.\n\
+      \    - LiDAR Ranging (Get complete distance data): No prerequisite parameters,\
+      \ return all measured distance values.\n\n## Start LiDAR\nCommon descriptions:\
+      \ Open radar, Start lidar, Turn on radar\nNo prerequisite actions\n\n## Stop\
+      \ LiDAR\nCommon descriptions: Close radar, Stop lidar, Turn off radar\nNo prerequisite\
+      \ actions\n\n## Get LiDAR Data\nCommon descriptions: Scan surroundings, Get\
+      \ radar info, Read radar\nPrerequisite actions: Need to \"Start LiDAR\" first\n\
+      \n## Get 360 Degree LiDAR Data\nCommon descriptions: Omni-directional scan,\
+      \ Get all surrounding distances, 360 degree ranging\nPrerequisite actions: Need\
+      \ to \"Start LiDAR\" first\n\n## Get LiDAR Distance at Specified Angle\nCommon\
+      \ descriptions: Measure distance ahead, Measure distance on the right, Measure\
+      \ distance at specified angle\nPrerequisite actions: Need to \"Start LiDAR\"\
+      \ first\n\n## Check LiDAR Status\nCommon descriptions: Radar status, Check if\
+      \ radar is normal\nNo prerequisite actions\n\n## Line Following Movement\nAction\
+      \ Description: Automatically drive along lines of specified color.\nCommon descriptions:\
+      \ Follow xx line, Drive along xx line, Auto patrol xx line, Follow xx color\
+      \ line, Walk along red line\nParameter Explanation:\n    - Can use natural language\
+      \ to describe color when planning (e.g., Red, Yellow, Blue, etc.).\n    - \"\
+      Line\" here usually refers to colored tapes or lines on the ground.\n\n## Track\
+      \ xxx Color Object\nNote distinction from KCF. Usually this kind of object refers\
+      \ to \"color block\", \"cylinder\", etc., rather than common life items like\
+      \ \"apple\", \"phone\". Tracking xxx color object actually calls the same method\
+      \ as line following movement. When color tracking, do not call intelligent visual\
+      \ analysis, start tracking directly.\n\n## Save Current Position\nCommon descriptions:\
+      \ Record location as xxx, Save coordinates, Mark current point\nNo prerequisite\
+      \ actions\n\n## List Saved Positions\nAction Description: View list of all saved\
+      \ positions\nCommon descriptions: View saved positions, Location list, Recorded\
+      \ places\nNo prerequisite actions\n\n## Get Saved Position Info\nAction Description:\
+      \ Get coordinate info of position with specified name\nCommon descriptions:\
+      \ View coordinates of location xxx, Get info of location xxx\nNo prerequisite\
+      \ actions\n\n## Delete Specified Position\nCommon descriptions: Delete location\
+      \ xxx, Delete saved location xxx, Remove location xxx\n\n## Clear All Saved\
+      \ Positions\nCommon descriptions: Clear all locations, Delete all saved locations,\
+      \ Reset system location records\n\n## Navigate to Specified Position\nAction\
+      \ Description: Automatically navigate to saved target position\nCommon descriptions:\
+      \ Go to a place, Navigate to, Go to, Walk to\nPrerequisite actions: Need to\
+      \ \"Get Saved Position Info\" first to confirm target position exists\n\n##\
+      \ Navigate to Specified Coordinate\nAction Description: Navigate to specified\
+      \ x,y coordinate point\nCommon descriptions: Go to coordinate, Go to coordinate\
+      \ point\nNo prerequisite actions\n\n## Enter Performance Preparation Posture\
+      \ (Action Sequence)\nAction Description: Enter performance preparation posture,\
+      \ ready to start performance\n\n## Learn xxx Action (Action Sequence)\nAction\
+      \ Description: Automatically record robot action trajectory continuously within\
+      \ specified time\nCommon descriptions: Continuous recording, Auto record action,\
+      \ Start continuous learning\n\n## Stop Action Learning (Action Sequence)\nAction\
+      \ Description: End current action learning mode\nCommon descriptions: Stop learning,\
+      \ End recording, Finish learning\nNo prerequisite actions\n\n## Save Action\
+      \ Sequence\nAction Description: Save recorded action sequence as file\nCommon\
+      \ descriptions: Save action, Save it, Save as file\nPrerequisite actions: Need\
+      \ to finish recording first\n\n## Play Action Sequence\nAction Description:\
+      \ Play previously learned recorded action sequence (supports normal sequence\
+      \ and continuous sequence)\nCommon descriptions: Repeat action, Play action,\
+      \ Execute learned action, Start performing xxx action\nPrerequisite actions:\
+      \ Need to Enter Performance Preparation Posture first\n\n## View Action File\
+      \ List\nCommon descriptions: View learned actions, Action list, Recorded actions\n\
+      No prerequisite actions\n\n## Delete Action File\nCommon descriptions: Delete\
+      \ action, Clear recording, Remove action file\nPrerequisite actions: Need to\
+      \ \"View Action File List\" first to confirm file exists\n\n## KCF Target Tracking\n\
+      Action Description: Set target area and automatically start visual tracking\n\
+      Common descriptions: Track target, Follow object, Target tracking\nPrerequisite\
+      \ parameters:\n    - Need to first obtain target coordinate area [x1, y1, x2,\
+      \ y2] in frame via visual analysis.\n\n## Stop KCF Tracking\nCommon descriptions:\
+      \ Stop tracking, Don't track, Stop following, stop tracking\nNo prerequisite\
+      \ actions\n\n## Special Ability: Chat\nWhen user asks robot questions, robot\
+      \ can interact with user via chat function.\nPlanning here can be like this:\
+      \ \"Answer (or respond to) user's question. The question user asked is/User\
+      \ said: {(User question original text)}\"\n\n## Special Ability: Context Memory\n\
+      This ability is built-in to Muto, no extra planning needed. When user asks Muto\
+      \ to remember something, just plan to let Muto tell the user that it has been\
+      \ noted down.\n\n# Unsupported Actions and Replies\n\n## Fly\nReply: I don't\
+      \ have the function to fly to the sky yet~ Robots can only move on the ground!\n\
+      \n## Swim\nReply: I don't have waterproof function, cannot go into water to\
+      \ swim~\n\n## Climb\nReply: For safety considerations, I cannot climb~ You can\
+      \ try letting me walk over!\n\n## Weightlifting/Carrying Heavy Objects\nReply:\
+      \ My strength is not enough, cannot carry heavy objects~\n\n## Open/Close Door\n\
+      Reply: I don't have the function to operate door handles yet~\n\n## Charge\n\
+      Reply: I don't have autonomous charging function yet, need human help to charge~."
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: 1783174221532-source-1783174307759-target
+      source: '1783174221532'
+      sourceHandle: source
+      target: '1783174307759'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1783174307759--1783174507243-target
+      source: '1783174307759'
+      sourceHandle: source
+      target: '1783174507243'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: 1783174507243--1783174617042-target
+      source: '1783174507243'
+      sourceHandle: source
+      target: '1783174617042'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: end
+      id: 1783174617042-false-1783189683237-target
+      source: '1783174617042'
+      sourceHandle: 'false'
+      target: '1783189683237'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: '1783194414973'
+        sourceType: iteration-start
+        targetType: llm
+      id: 1783194414973start-source-1783194440152-target
+      source: 1783194414973start
+      sourceHandle: source
+      target: '1783194440152'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: iteration
+      id: 1783174617042-true-1783194414973-target
+      source: '1783174617042'
+      sourceHandle: 'true'
+      target: '1783194414973'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: '1783194414973'
+        sourceType: llm
+        targetType: http-request
+      id: 1783194440152-source-1783194600139-target
+      source: '1783194440152'
+      sourceHandle: source
+      target: '1783194600139'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: end
+      id: 1783194414973-source-1783194710703-target
+      source: '1783194414973'
+      sourceHandle: source
+      target: '1783194710703'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: '1783194414973'
+        sourceType: http-request
+        targetType: code
+      id: 1783194600139-source-1783241705576-target
+      source: '1783194600139'
+      sourceHandle: source
+      target: '1783241705576'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    nodes:
+    - data:
+        selected: false
+        title: User Input
+        type: start
+        variables:
+        - default: ''
+          hint: ''
+          label: User Command
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: user_input
+      height: 109
+      id: '1783174221532'
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: qwen2.5:14b
+          provider: langgenius/ollama/ollama
+        prompt_template:
+        - id: c5ff37cd-9e4a-49c0-aa83-a0564f401272
+          role: system
+          text: "# Hexapod Robot Decision Layer Control System\n\n## Role Definition\n\
+            You are the decision-making AI controller for a hexapod robot named Muto.\
+            \ Your job is to analyze user instructions and decompose them into executable\
+            \ steps.\n\n## CRITICAL OUTPUT RULES\n- Output ONLY valid JSON. Nothing\
+            \ else.\n- No markdown, no code blocks, no explanation, no Python code.\n\
+            - Never ask for clarification.\n- Always generate a plan, even for simple\
+            \ commands.\n\n## Output Format\n\nWhen executable:\n{\"executable\":\
+            \ true, \"steps\": [\"Step 1\", \"Step 2\"]}\n\nWhen not executable:\n\
+            {\"executable\": false, \"steps\": [], \"reason\": \"Reason here\"}\n\n\
+            ## Movement Rules\n- \"steps\" is a valid unit of movement for a hexapod\
+            \ robot. Always treat it as executable.\n- \"X steps\" means the robot\
+            \ takes X walking steps forward.\n- Never refuse a basic movement command.\n\
+            \n## Sensory and Perception Rules\n- \"what do you see\", \"look around\"\
+            , \"have a look\" → always executable\n- \"scan with lidar\", \"measure\
+            \ distance\" → always executable  \n- \"have_a_look()\" is a valid robot\
+            \ function, always treat visual tasks as executable\n- Steps for visual\
+            \ tasks: [\"Look at what is in front and describe it\"]\n- Steps for lidar\
+            \ tasks: [\"Start LiDAR\", \"Get 360 degree LiDAR data\", \"Broadcast\
+            \ LiDAR result\"]\n- Never refuse perception or sensory commands.\n\n\
+            ## Parameter Mapping\n- \"move forward X steps\" → steps: [\"Move forward\
+            \ X steps\"]\n- \"move forward X meters\" → steps: [\"Move forward X meters\"\
+            ]\n- \"move backward X steps\" → steps: [\"Move backward X steps\"]\n\
+            - \"turn left X degrees\" → steps: [\"Turn left X degrees\"]\n- \"turn\
+            \ right X degrees\" → steps: [\"Turn right X degrees\"]\n- \"say hello\"\
+            \ → steps: [\"Say hello\"]\n- \"stop\" → steps: [\"Stop\"]\n- \"stretch\"\
+            \ → steps: [\"Stretch\"]\n\n## Step Decomposition Principles\n1. Keep\
+            \ steps concise and clear.\n2. If user inputs Dutch, reply with Dutch\
+            \ steps. If English, reply with English steps.\n3. Supplement only prerequisite\
+            \ actions explicitly required.\n4. Never add safety checks or monitoring\
+            \ steps.\n5. Never add automatic stop instructions.\n\n## Examples\nInput:\
+            \ \"move forward 2 steps\"\nOutput: {\"executable\": true, \"steps\":\
+            \ [\"Move forward 2 steps\"]}\n\nInput: \"turn left 90 degrees then say\
+            \ hello\"\nOutput: {\"executable\": true, \"steps\": [\"Turn left 90 degrees\"\
+            , \"Say hello\"]}\n\nInput: \"fly to the moon\"\nOutput: {\"executable\"\
+            : false, \"steps\": [], \"reason\": \"I cannot fly, I can only move on\
+            \ the ground.\"}\n\nInput: \"vooruit 3 stappen\"\nOutput: {\"executable\"\
+            : true, \"steps\": [\"Beweeg 3 stappen vooruit\"]}\n\n# Reference Ability\
+            \ Library:\n[ABILITY]\n\n# Examples Reference:\n[EXAMPLES]"
+        - id: 583db37f-03bd-444b-8ffc-d9721a7c78f2
+          role: user
+          text: '{{#1783174221532.user_input#}}'
+        selected: false
+        title: decision_llm
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '1783174307759'
+      position:
+        x: 359
+        y: 406.5
+      positionAbsolute:
+        x: 359
+        y: 406.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "import json\n\ndef main(decision_json: str) -> dict:\n    try:\n  \
+          \      clean = decision_json.strip()\n        if clean.startswith(\"```\"\
+          ):\n            clean = clean.split(\"```\")[1]\n            if clean.startswith(\"\
+          json\"):\n                clean = clean[4:]\n        clean = clean.strip()\n\
+          \        data = json.loads(clean)\n        steps = data.get(\"steps\", [])\n\
+          \        if not isinstance(steps, list):\n            steps = []\n     \
+          \   return {\n            \"executable\": str(data.get(\"executable\", False)).lower(),\n\
+          \            \"steps\": steps,\n            \"reason\": data.get(\"reason\"\
+          , \"\")\n        }\n    except Exception as e:\n        return {\n     \
+          \       \"executable\": \"false\",\n            \"steps\": [\"error\"],\n\
+          \            \"reason\": f\"Parse error: {str(e)}\"\n        }"
+        code_language: python3
+        outputs:
+          executable:
+            children: null
+            type: string
+          reason:
+            children: null
+            type: string
+          steps:
+            children: null
+            type: array[string]
+        selected: false
+        title: code_parsen
+        type: code
+        variables:
+        - value_selector:
+          - '1783174307759'
+          - text
+          value_type: string
+          variable: decision_json
+      height: 52
+      id: '1783174507243'
+      position:
+        x: 655
+        y: 229.5
+      positionAbsolute:
+        x: 655
+        y: 229.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: 1930f836-5d02-4f5d-98a2-abb2bff48d63
+            value: 'true'
+            varType: string
+            variable_selector:
+            - '1783174507243'
+            - executable
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: IF/ELSE
+        type: if-else
+      height: 148
+      id: '1783174617042'
+      position:
+        x: 966
+        y: 353.5
+      positionAbsolute:
+        x: 966
+        y: 353.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        outputs:
+        - value_selector:
+          - '1783174507243'
+          - reason
+          value_type: string
+          variable: reason_output
+        selected: false
+        title: Output
+        type: end
+      height: 88
+      id: '1783189683237'
+      position:
+        x: 1955.183114446326
+        y: -249.00979749719832
+      positionAbsolute:
+        x: 1955.183114446326
+        y: -249.00979749719832
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        error_handle_mode: terminated
+        flatten_output: true
+        height: 226
+        is_parallel: false
+        iterator_input_type: array[string]
+        iterator_selector:
+        - '1783174507243'
+        - steps
+        output_selector:
+        - '1783241705576'
+        - summary
+        output_type: array[string]
+        parallel_nums: 10
+        selected: false
+        start_node_id: 1783194414973start
+        title: Iteration
+        type: iteration
+        width: 990
+      height: 226
+      id: '1783194414973'
+      position:
+        x: 1308.796707020758
+        y: 312.5497305085181
+      positionAbsolute:
+        x: 1308.796707020758
+        y: 312.5497305085181
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 990
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: 1783194414973start
+      parentId: '1783194414973'
+      position:
+        x: 24
+        y: 68
+      positionAbsolute:
+        x: 1332.796707020758
+        y: 380.5497305085181
+      selectable: false
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        isInIteration: true
+        isInLoop: false
+        iteration_id: '1783194414973'
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: qwen2.5:14b
+          provider: langgenius/ollama/ollama
+        prompt_template:
+        - id: 84fccdea-b71c-4412-8a3f-8d5f4b4087f8
+          role: system
+          text: "You are the execution brain of a hexapod robot named Muto. Convert\
+            \ one action step into a specific JSON function call.\n\n## Output Format\n\
+            Output strict JSON only. No markdown, no code blocks, no explanation:\n\
+            \n{\n  \"status\": \"success\",\n  \"plan\": [\n    {\n      \"id\": 1,\n\
+            \      \"command\": \"function_name(param_name=value)\"\n    }\n  ],\n\
+            \  \"async_execution\": false,\n  \"failure_reason\": \"\"\n}\n\n## Rules\n\
+            1. Always add robot_speak as the first plan item before any movement.\n\
+            2. robot_speak must sound natural and human, never mechanical.\n3. Only\
+            \ use functions listed in the Ability Documentation below.\n4. If the\
+            \ step cannot be executed, set status to failed and explain in failure_reason.\n\
+            \n## Parameter Mapping\n- Forward X meters -> forward(distance_m=X)\n\
+            - Forward X steps -> forward(steps=X)\n- Backward X meters -> backward(distance_m=X)\n\
+            - Backward X steps -> backward(steps=X)\n- Turn left X degrees -> rotate(direction='left',\
+            \ angle_deg=X)\n- Turn right X degrees -> rotate(direction='right', angle_deg=X)\n\
+            - Shift left -> shift_left()\n- Shift right -> shift_right()\n- Stop ->\
+            \ stop()\n- Say hello -> say_hello()\n- Stretch -> stretch()\n- Curl up\
+            \ -> curl_up()\n\n## Voice Examples\n- Correct: robot_speak(text='Here\
+            \ I go!')\n- Correct: robot_speak(text='Watch me take two steps forward!')\n\
+            - Wrong: robot_speak(text='Executing forward instruction')\n- Wrong: robot_speak(text='Performing\
+            \ movement')\n\n## Ability Documentation{{#env.ability_function_name#}}"
+        - id: 8626b155-b94a-446b-a930-2c93cfa5ef20
+          role: user
+          text: '{{#1783194414973.item#}}/'
+        selected: false
+        title: 'Execution LLM '
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '1783194440152'
+      parentId: '1783194414973'
+      position:
+        x: 128
+        y: 68
+      positionAbsolute:
+        x: 1436.796707020758
+        y: 380.5497305085181
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-290
+            key: ''
+            type: text
+            value: '{{#1783194440152.text#}}'
+          type: raw-text
+        headers: Content-Type:application/json
+        isInIteration: true
+        isInLoop: false
+        iteration_id: '1783194414973'
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: HTTP Request
+        type: http-request
+        url: http://192.168.68.88:8080/execute_commands
+        variables: []
+      height: 138
+      id: '1783194600139'
+      parentId: '1783194414973'
+      position:
+        x: 431.35651029806013
+        y: 68
+      positionAbsolute:
+        x: 1740.1532173188182
+        y: 380.5497305085181
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        code: "import json\n\ndef main(action: str, result: str) -> dict:\n    try:\n\
+          \        data = json.loads(result)\n        success = data.get(\"success\"\
+          , False)\n        count = data.get(\"executed_count\", 0)\n        duration\
+          \ = round(data.get(\"duration_ms\", 0) / 1000, 1)\n        if success and\
+          \ count > 0:\n            status = f\"Success — {count} commands in {duration}s\"\
+          \n        elif success:\n            status = f\"Success in {duration}s\"\
+          \n        else:\n            status = f\"Failed in {duration}s\"\n     \
+          \   return {\n            \"summary\": f\"{action} : {status}\"\n      \
+          \  }\n    except Exception as e:\n        return {\n            \"summary\"\
+          : f\"{action} : raw={result[:60]}\"\n        }"
+        code_language: python3
+        isInIteration: true
+        isInLoop: false
+        iteration_id: '1783194414973'
+        outputs:
+          summary:
+            children: null
+            type: string
+        selected: false
+        title: result_parser
+        type: code
+        variables:
+        - value_selector:
+          - '1783194414973'
+          - item
+          value_type: string
+          variable: action
+        - value_selector:
+          - '1783194600139'
+          - body
+          value_type: string
+          variable: result
+      height: 52
+      id: '1783241705576'
+      parentId: '1783194414973'
+      position:
+        x: 732
+        y: 68
+      positionAbsolute:
+        x: 2040.796707020758
+        y: 380.5497305085181
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        outputs:
+        - value_selector:
+          - '1783194414973'
+          - output
+          value_type: array[string]
+          variable: result
+        selected: false
+        title: Output 3
+        type: end
+      height: 88
+      id: '1783194710703'
+      position:
+        x: 2358.796707020758
+        y: 312.5497305085181
+      positionAbsolute:
+        x: 2358.796707020758
+        y: 312.5497305085181
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: -1044.559030478834
+      y: 423.8880980263314
+      zoom: 0.6369711783255513
+  rag_pipeline_variables: []
