@@ -1,0 +1,19 @@
+rtabmap:
+  ros__parameters:
+    frame_id: base_link
+    odom_frame_id: odom
+    subscribe_rgbd: true
+    subscribe_scan: true
+    use_action_for_goal: true
+    map_always_update: true
+    qos_scan: 2
+    qos_image: 2
+    approx_sync: true
+    approx_sync_max_interval: 0.5
+    topic_queue_size: 100
+    sync_queue_size: 100
+    Reg/Strategy: '1'
+    Reg/Force3DoF: 'true'
+    RGBD/NeighborLinkRefining: 'true'
+    Grid/RangeMin: '0.2'
+    Optimizer/GravitySigma: '0'
