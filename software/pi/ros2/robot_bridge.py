@@ -130,6 +130,9 @@ def _yaw_delta(from_yaw, to_yaw):
 
 # Rotatie-parameters
 ROTATE_STEP          = 10     # kleine stap = langzaam draaien = preciezere stop
+# Vergeleken met step=15 op 9 aug 2026 (n=8 op 25 graden): step=15 gaf gemiddeld
+# 3-4x grotere overshoot (marge is gekalibreerd vóór step=10) zonder meetbaar
+# tijdvoordeel (7.5s vs 7.7s per rotatie) -- step=10 blijft de juiste keuze.
 # Vaste coast-compensatie (graden): empirisch gemeten 2026-08-07 (n=4: -30 uit eerdere
 # sessie + 5.2/11.83/19.17 vandaag) dat de robot na het stopcommando ~11-16 graden
 # doordraait (gem. 13.9), ONAFHANKELIJK van de doelhoek. De oude formule (target*0.5)
@@ -210,9 +213,11 @@ def rotate_to_angle(angle_deg: float) -> dict:
     }
     if below_resolution:
         result["note"] = (
-            f"doelhoek ({target}°) kleiner dan gemeten minimum-coast "
-            f"({stop_margin}°) — resultaat wordt gedomineerd door "
-            "mechanisme-resolutie, niet door regelnauwkeurigheid"
+            f"doelhoek ({target}°) kleiner dan de marge ({stop_margin}°) — de lus "
+            "breekt hierdoor al bij de allereerste check, dus er is geen aanlooptijd. "
+            "Gemeten (9 aug 2026, n=8, 4-13°): het resultaat is dan vrijwel altijd "
+            "~5-6° ongeacht de gevraagde hoek, NIET evenredig. Verwacht dus overshoot "
+            "bij doelen <6° en fors tekortschieten bij doelen 6-14°."
         )
     return result
 

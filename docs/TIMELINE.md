@@ -292,6 +292,7 @@ Chronologisch overzicht van alle mijlpalen, beslissingen en hardware-events.
 - **`robot-bridge.service`** (systemd) aangemaakt — bewust *disabled* i.p.v. auto-start, want `app_muto.py` start al automatisch op via `~/.config/autostart/app.desktop` en deelt dezelfde seriële poort.
 - **Docstring-fix** `rotate_to_angle()` (links/rechts).
 - **OLED-scherm bevestigd werkend** (was onduidelijk gedocumenteerd sinds de sessie van 26 juni) — hardware + driver + autostart intact, gebruiker bevestigde leesbare data op het scherm.
+- **Live rotatietests uitgevoerd** (robot aan, gebruiker als toezicht): coast-model bij hoeken <14° gekwantificeerd (blijkt een vaste ~5-6° minimum-puls, niet evenredig), links/rechts-asymmetrie op 25° bevestigd (rechts 3× zo onvoorspelbaar als links, geen vaste bias), en de openstaande vraag uit 13h beantwoord: `ROTATE_STEP=15` geeft 3-4× meer overshoot zonder tijdwinst t.o.v. `ROTATE_STEP=10` — step=10 blijft de juiste keuze. Zie [PROBLEMS.md](../problems/PROBLEMS.md#-rotatie--precisiebeweging-robot_bridgepy) voor de volledige cijfers.
 
 ---
 
@@ -301,10 +302,10 @@ Chronologisch overzicht van alle mijlpalen, beslissingen en hardware-events.
 |---|---|
 | 🔴 Hoog | `app_muto.py` permanent uitschakelen bij boot (start nu nog automatisch via `~/.config/autostart/app.desktop`, botst met `robot_bridge.py`/ROS-driver) |
 | 🔴 Hoog | IMU-magnetometer hard/soft-iron-kalibratie + as-remap valideren (rootcause bekend, fix nog niet geïmplementeerd) |
-| 🟡 Midden | Live valideren van de nieuwe `correct_drift`-forward-correctie en de `rotate_to_angle`-docstring-fix op de robot |
-| 🟡 Midden | Links/rechts-asymmetrie in `rotate_to_angle`-nauwkeurigheid bevestigen (meer herhalingen nodig, n=6 vs n=9 tot nu toe) |
-| 🟡 Midden | Coast-model bij hoeken <14° apart modelleren (nu nog vaste marge, kleine ondershoot-nuance bij hele kleine doelen) |
+| 🟡 Midden | Live valideren van de nieuwe `correct_drift`-forward-correctie op de robot (rotatie-kalibratie zelf is inmiddels bevestigd, zie hieronder) |
 | 🟡 Midden | 3 uiteenlopende kopieën van `MutoLibCore.py` (host-clone, wiki-mirror, live dist-packages) opschonen |
+| 🟢 Laag | Sub-14°-rotaties bruikbaar maken (nu een vaste ~5-6° minimum-puls, niet evenredig) — bijv. een minimale looptijd forceren vóór de stopconditie geëvalueerd wordt |
+| 🟢 Laag | Rootcause van de grotere onvoorspelbaarheid bij rechtsom draaien (std.dev 4.6° vs 1.4° links) — STM32-firmware is niet lokaal beschikbaar, dus hardwarematig verder uitzoeken heeft een harde grens |
 | 🟢 Laag | `hexapod_slam_localization.launch.py`/`rtabmap_localization_launch.py` verder bekijken als er ooit een RTAB-Map-database wordt opgebouwd |
 | 🟢 Laag | RTAB-Map/Jetson-pad alleen heroverwegen bij een lichtere/lokale variant zonder Jetson (zie PROBLEMS.md) |
 | 🟢 Laag | `foot_contact.py` integreren in muto_driver_fixed.py als ROS2 node |

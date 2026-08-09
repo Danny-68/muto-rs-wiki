@@ -326,6 +326,23 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
 - **Mitigatie (handmatig, sinds 7 augustus):** in batches van 0.3m lopen, na elke batch met `rotate_to_angle` terugcorrigeren naar de referentie-yaw.
 - **Fix (geautomatiseerd, 9 augustus 2026):** `POST /robot/forward` met `{"correct_drift": true, "distance_m": ...}` doet dit nu automatisch — zie `_forward_with_drift_correction()` in `software/pi/ros2/robot_bridge.py`. Standaardgedrag van `/robot/forward` blijft ongewijzigd (fire-and-forget) tenzij dit veld expliciet wordt meegegeven.
 
+### `rotate_to_angle` bij hoeken <14° draait altijd ~5-6°, ongeacht de gevraagde hoek
+- **Gemeten (9 aug 2026, n=8, hoeken 4-13° beide richtingen):** turned_deg lag steeds tussen 4.4° en 5.9°, volledig onafhankelijk van of er 4° of 13° gevraagd werd.
+- **Oorzaak:** onder de marge (14°) is `target - stop_margin` al negatief vóór de robot ook maar begint te bewegen, dus de polling-lus breekt bij de allereerste check — er is geen aanlooptijd, en het resultaat is een vaste, ongecontroleerde minimum-puls van ~5-6°.
+- **Praktisch gevolg:** verwacht overshoot bij doelen <6°, en fors tekortschieten bij doelen 6-14°. De `below_resolution`-melding in `robot_bridge.py` is bijgewerkt om dit expliciet te benoemen.
+- **Nog niet gefixt:** een aparte aanpak voor dit bereik (bijv. een minimale looptijd forceren vóór de stopconditie geëvalueerd wordt) is niet geïmplementeerd — alleen gedocumenteerd.
+
+### `ROTATE_STEP=15` i.p.v. 10: veel grotere overshoot, geen tijdwinst
+- **Vraag (sectie 13h):** is `ROTATE_STEP=10` onnodig traag?
+- **Test (9 aug 2026, n=8 op 25°, beide richtingen):** step=15 gaf gemiddeld 3-4× grotere overshoot (rechts +21.2° vs +4.8°, links +14.8° vs -4.1°) — `ROTATE_STOP_MARGIN=14.0` is gekalibreerd vóór step=10 en schaalt niet mee naar grotere stappen.
+- **Tijd:** vrijwel gelijk (7.5s vs 7.7s per rotatie) — de stapgrootte is niet de beperkende factor voor snelheid.
+- **Conclusie:** `ROTATE_STEP=10` blijft de juiste keuze; step=15 zou een eigen herkalibratie van de marge nodig hebben voor exact hetzelfde resultaat qua tijd — geen reden om te wijzigen.
+
+### Links/rechts-asymmetrie op 25°: rechts niet per se bevooroordeeld, wel veel onvoorspelbaarder
+- **Gemeten (9 aug 2026, n=6 per richting, op 25°):** rechts gem. +2.1° afwijking maar met std.dev **4.6°** (spreiding -3.4° tot +7.5°); links gem. -3.85° met std.dev **1.4°** (veel consistenter, -1.4° tot -5.6°).
+- **Interpretatie:** dit wijkt af van een eerdere, kleinere meting met gemengde hoeken die een lichte bias de andere kant op suggereerde — het patroon lijkt dus geen vaste, corrigeerbare links/rechts-bias, maar eerder **inherente mechanische speling die bij rechtsom draaien groter/onvoorspelbaarder is**.
+- **Rootcause-status:** dieper uitgezocht in de STM32-communicatie (sectie 18.3 van de debug-briefing) leverde geen mechanische verklaring op — de firmware-broncode zelf is niet lokaal beschikbaar, dus de exacte oorzaak (bijv. een specifieke poot/servo) blijft onbevestigd.
+
 ### Tijd-gebaseerde `/cmd_vel`-bursts geven onvoorspelbare afstand
 - **Oorzaak:** aangenomen snelheid (`level × 0.01 m/s`) is nooit gevalideerd en klopt niet — niveau 15 is in werkelijkheid maar 0.059 m/s, ruim 2,5× langzamer dan aangenomen.
 - **Fix:** gebruik altijd de gekalibreerde `robot_bridge.py`-commando's (`distance_m`, `angle_deg`) of de onderliggende `forward()`/`turnleft()`/etc. — nooit een tijdsduur combineren met een aangenomen snelheid.
