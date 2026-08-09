@@ -727,5 +727,23 @@ def status():
         "step_distance_m": STEP_DISTANCE_M,
     })
 
+def _stop_app_muto():
+    """
+    app_muto.py start automatisch op bij elke Pi-login (~/.config/autostart/
+    app.desktop) -- bewust zo gelaten (gebruiker wil na een koude start direct
+    met de gamepad kunnen besturen). robot_bridge.py deelt exclusief
+    /dev/myserial met app_muto.py, dus stopt het hier zelf bij het opstarten,
+    net zoals de andere stack-scripts (switch_to_own_stack.sh,
+    muto_fase1_start.sh, muto_rtabmap_start.sh) al deden -- robot_bridge.py
+    miste deze stap nog wanneer het rechtstreeks/via systemd gestart werd.
+    """
+    if subprocess.run(["pgrep", "-f", "app_muto.py"], capture_output=True).returncode == 0:
+        print("[startup] app_muto.py actief, wordt gestopt (serial poort vrijmaken)...")
+        subprocess.run(["pkill", "-f", "app_muto.py"])
+        time.sleep(2)
+        subprocess.run(["pkill", "-9", "-f", "app_muto.py"])
+        time.sleep(1)
+
 if __name__ == "__main__":
+    _stop_app_muto()
     app.run(host="0.0.0.0", port=5000, debug=False)

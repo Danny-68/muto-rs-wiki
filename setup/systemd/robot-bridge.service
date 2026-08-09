@@ -2,9 +2,12 @@
 Description=Muto RS robot_bridge.py — Flask/HTTP bridge naar STM32-serieel
 Documentation=file:///home/pi/muto_inventarisatie.md
 After=network.target
-# LET OP: nooit gelijktijdig starten met app_muto.py of muto_driver_fixed.py --
-# alle drie gebruiken exclusief /dev/myserial. app_muto.py start automatisch
-# op via ~/.config/autostart/app.desktop, dus stop die eerst handmatig.
+# LET OP: nooit gelijktijdig met muto_driver_fixed.py -- beide gebruiken
+# exclusief /dev/myserial. app_muto.py hoeft niet handmatig gestopt te worden:
+# robot_bridge.py doet dit sinds 9 aug 2026 zelf bij het opstarten (zie
+# _stop_app_muto() onderaan het bestand) -- app_muto.py's autostart blijft
+# bewust actief (~/.config/autostart/app.desktop), zodat na een koude start
+# altijd meteen met de gamepad bestuurd kan worden zonder iets te hoeven doen.
 
 [Service]
 Type=simple

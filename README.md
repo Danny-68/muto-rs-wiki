@@ -120,7 +120,7 @@ D:\llama.cpp\start_llama.bat
 4. **NOOIT** twee RTAB-Map instanties tegelijk → database locked
 5. **ALTIJD** `docker restart humble_run` als stap 0 voor RTAB-Map
 6. **ALTIJD** `pkill -f app_muto.py` voor Nav2 start
-7. **NOOIT** `app_muto.py`, `muto_driver_fixed.py` en `robot_bridge.py` gelijktijdig — delen exclusief `/dev/myserial`. `app_muto.py` start automatisch op via `~/.config/autostart/app.desktop`, dus expliciet stoppen vóór de andere twee.
+7. **NOOIT** `app_muto.py`, `muto_driver_fixed.py` en `robot_bridge.py` gelijktijdig — delen exclusief `/dev/myserial`. `app_muto.py`'s autostart (`~/.config/autostart/app.desktop`) blijft **bewust actief** — na een koude start moet direct met de gamepad bestuurd kunnen worden. Alle stack-startscripts (`switch_to_own_stack.sh`, `switch_to_yahboom.sh`, `muto_fase1_start.sh`, `muto_rtabmap_start.sh`) stoppen `app_muto.py` al zelf als eerste stap; `robot_bridge.py` doet dit sinds 9 aug 2026 ook zelf bij het opstarten (`_stop_app_muto()`), dus je hoeft dit nooit meer handmatig te doen.
 8. **ALTIJD** bij een noodstop **ook** een directe rauwe seriële STOP-byte sturen, niet alleen het ROS-proces killen — de STM32 latcht het laatste commando en blijft dat uitvoeren (zie [PROBLEMS.md](problems/PROBLEMS.md)).
 9. **NOOIT** `reversion` in `ydlidar.yaml` los aanpassen zonder te checken welke laser-TF-aanpak actief is (handmatige TF ↔ `false`, officieel URDF ↔ `true`) — zie PROBLEMS.md.
 
