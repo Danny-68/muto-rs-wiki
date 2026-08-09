@@ -293,6 +293,7 @@ Chronologisch overzicht van alle mijlpalen, beslissingen en hardware-events.
 - **Docstring-fix** `rotate_to_angle()` (links/rechts).
 - **OLED-scherm bevestigd werkend** (was onduidelijk gedocumenteerd sinds de sessie van 26 juni) — hardware + driver + autostart intact, gebruiker bevestigde leesbare data op het scherm.
 - **Live rotatietests uitgevoerd** (robot aan, gebruiker als toezicht): coast-model bij hoeken <14° gekwantificeerd (blijkt een vaste ~5-6° minimum-puls, niet evenredig), links/rechts-asymmetrie op 25° bevestigd (rechts 3× zo onvoorspelbaar als links, geen vaste bias), en de openstaande vraag uit 13h beantwoord: `ROTATE_STEP=15` geeft 3-4× meer overshoot zonder tijdwinst t.o.v. `ROTATE_STEP=10` — step=10 blijft de juiste keuze. Zie [PROBLEMS.md](../problems/PROBLEMS.md#-rotatie--precisiebeweging-robot_bridgepy) voor de volledige cijfers.
+- **Forward-drift-correctie live getest, twee bugs gevonden en gefixt:** eerste versie had een tekenfout (`rotate_to_angle(-drift)` i.p.v. `rotate_to_angle(drift)`) die de afwijking verergerde in plaats van herstelde (0.6m: -14.2° werd -62.2°) — direct live ontdekt en gefixt. Na de tekenfix bleef per-batch correctie nog steeds matig omdat een enkele batch-drift (~5-6°) in de onbetrouwbare sub-14°-zone valt; drempel opgehoogd naar 15° (2-3 batches accumuleren, zoals sectie 18.5). **Eindresultaat: 0.9m ongecorrigeerd -17.4°, gecorrigeerd -0.7°.**
 
 ---
 
@@ -302,7 +303,6 @@ Chronologisch overzicht van alle mijlpalen, beslissingen en hardware-events.
 |---|---|
 | 🔴 Hoog | `app_muto.py` permanent uitschakelen bij boot (start nu nog automatisch via `~/.config/autostart/app.desktop`, botst met `robot_bridge.py`/ROS-driver) |
 | 🔴 Hoog | IMU-magnetometer hard/soft-iron-kalibratie + as-remap valideren (rootcause bekend, fix nog niet geïmplementeerd) |
-| 🟡 Midden | Live valideren van de nieuwe `correct_drift`-forward-correctie op de robot (rotatie-kalibratie zelf is inmiddels bevestigd, zie hieronder) |
 | 🟡 Midden | 3 uiteenlopende kopieën van `MutoLibCore.py` (host-clone, wiki-mirror, live dist-packages) opschonen |
 | 🟢 Laag | Sub-14°-rotaties bruikbaar maken (nu een vaste ~5-6° minimum-puls, niet evenredig) — bijv. een minimale looptijd forceren vóór de stopconditie geëvalueerd wordt |
 | 🟢 Laag | Rootcause van de grotere onvoorspelbaarheid bij rechtsom draaien (std.dev 4.6° vs 1.4° links) — STM32-firmware is niet lokaal beschikbaar, dus hardwarematig verder uitzoeken heeft een harde grens |

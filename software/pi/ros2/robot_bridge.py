@@ -297,8 +297,16 @@ def _start_move(addr, body: dict) -> dict:
 # vrij consistent (std.dev ~0.86 graden) -- systematische oorzaak (gait-/
 # servo-asymmetrie), geen incidenteel trackingverlies. Batch van 0.3m is wat
 # destijds handmatig werkte (18.5); dit automatiseert diezelfde aanpak.
-FORWARD_DRIFT_BATCH_M     = 0.3
-FORWARD_DRIFT_MIN_CORRECT = 1.5  # graden -- kleinere afwijkingen niet de moeite waard
+FORWARD_DRIFT_BATCH_M          = 0.3
+# LET OP (live gemeten 9 aug 2026): drempel moet RUIM BOVEN ROTATE_STOP_MARGIN
+# (14 graden) liggen. Een enkele 0.3m-batch drift (~5-6 graden) valt middenin de
+# onbetrouwbare sub-marge-zone van rotate_to_angle (zie PROBLEMS.md) -- daar
+# corrigeren maakt het resultaat ONVOORSPELBAARDER i.p.v. beter (getest: 0.6m
+# ongecorrigeerd -12.2 graden, per-batch "gecorrigeerd" nog steeds +7.1 graden
+# netto). Pas corrigeren zodra de opgebouwde afwijking >15 graden is (2-3
+# batches, zoals de bewezen handmatige aanpak uit sectie 18.5) geeft de
+# rotate_to_angle-mechaniek genoeg aanlooptijd om betrouwbaar te zijn.
+FORWARD_DRIFT_CORRECT_THRESHOLD = 15.0  # graden
 
 def _read_yaw_once():
     with _serial_lock:
@@ -341,8 +349,13 @@ def _forward_with_drift_correction(step: int, total_distance_m: float) -> dict:
         else:
             drift = _yaw_delta(ref_yaw, yaw)
             entry["drift_deg"] = round(drift, 1)
-            if abs(drift) >= FORWARD_DRIFT_MIN_CORRECT:
-                entry["correction"] = rotate_to_angle(-drift)
+            if abs(drift) >= FORWARD_DRIFT_CORRECT_THRESHOLD:
+                # LET OP (bug gevonden+gefixt 9 aug 2026): een POSITIEVE hoek op
+                # rotate_to_angle ("rechts") verlaagt de gemeten yaw, geen sign-flip
+                # dus -- eerdere versie deed rotate_to_angle(-drift) en verergerde
+                # de afwijking elke batch i.p.v. 'm te herstellen (live gemeten:
+                # -14.2 graden baseline werd -62.2 graden met de kapotte correctie).
+                entry["correction"] = rotate_to_angle(drift)
         batches.append(entry)
 
     return {"ok": True, "corrected": True, "reference_yaw": round(ref_yaw, 1), "batches": batches}
