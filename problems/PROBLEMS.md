@@ -41,6 +41,12 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
 - **Oorzaak:** Verkeerde laser TF yaw waarde
 - **Fix:** Definitieve yaw waarde = **0** (niet 1.5708 of -1.5708)
 
+### RTAB-Map + Jetson roadmap: on hold wegens Pi/Jetson/WiFi-belasting
+- **Symptoom:** hoge Pi-load (`uptime`), undervoltage/thermisch-throttle-signalen (`vcgencmd get_throttled`) tijdens `/rgbd_image`-streaming naar de Jetson.
+- **Geprobeerd:** `/rgbd_image` throttlen naar 3Hz via `topic_tools throttle` — verminderde de belasting niet genoeg om het de moeite waard te maken.
+- **Beslissing:** overgestapt op `switch_to_yahboom.sh` → lidar-only Nav2/AMCL-aanpak op de Pi alleen, geen camera/Jetson meer nodig (zie [SLAM_NAV2.md](../slam/SLAM_NAV2.md) voor de huidige aanpak).
+- **Heropname-voorwaarde:** alleen heroverwegen als er een lichtere/lokale RTAB-Map-variant mogelijk blijkt **zonder** de Jetson-split (bijv. volledig lokaal op de Pi, of met een sterk verlaagde framerate/resolutie) — anders herhaal je dezelfde belastingsmeting voor niets.
+
 ---
 
 ## 📡 TF Publishers
@@ -248,9 +254,20 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
 ## 🔭 LiDAR (YDLidar TG30)
 
 ### Scan roteert / kaart chaos
-- **Oorzaak:** `reversion: true` in ydlidar.yaml OF meerdere instances
-- **Fix reversion:** Zet `reversion: false`
+- **Oorzaak:** meerdere ydlidar-instances tegelijk actief
 - **Fix instances:** `pkill -9 -f ydlidar` dan herstarten
+- **Oorzaak (reversion):** zie onderstaande **⚠️ UPDATE 31 juli** — `reversion` alléén is geen vaste waarde, hangt af van welke laser-TF-aanpak je gebruikt.
+
+> **⚠️ UPDATE 31 juli 2026 — reversion hangt samen met de TF-aanpak, niet los aanpasbaar:**
+> Deze entry zei eerder onvoorwaardelijk "zet `reversion: false`". Dat klopte alleen zolang er een **handmatige** `static_transform_publisher` met een 180°-yaw-correctie (`--qz 1 --qw 0`) werd gebruikt voor `base_link→laser`.
+> Sinds de overstap naar het **officiële URDF + `robot_state_publisher`** (i.p.v. handmatige static transforms, zie TIMELINE 31 juli) hoort daar **`reversion: true`** bij — Yahboom's eigen `laser_bringup_launch.py` gebruikt voor het 4ROS/YDLidar-pad exact deze combinatie (`reversion: True, inverted: True`), en dat is live geverifieerd correct (scan op 0°/90°/180°/270° klopte met de fysieke situatie).
+> **Regel:** `reversion: false` + handmatige 180°-TF **OF** `reversion: true` + officieel URDF. **Nooit** de twee door elkaar combineren (dan corrigeer je 180° dubbel, of helemaal niet). Zie [SLAM_NAV2.md](../slam/SLAM_NAV2.md) voor de huidige (URDF-gebaseerde) aanpak.
+
+### 90°-brede blinde sector, geen enkele meting in dat bereik
+- **Oorzaak:** fysiek losse lidar-stekker — **geen software-/TF-/reversion-bug**, ook al toont het driver-log geen disconnect en lijken de timestamps vers.
+- **Herkenning:** een grote (tientallen graden), aaneengesloten lege sector die een bekend nabij object volledig mist.
+- **Fix:** stekker fysiek controleren/vastzetten, dan robot **en** container volledig herstarten (niet alleen de ROS-processen).
+- **Les:** bij zo'n symptoom eerst de kabel checken, pas daarna in software zoeken.
 
 ### Lidar type fout
 - **Correct:** `lidar_type: 0` (TYPE_TOF)
@@ -263,3 +280,61 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
   ros2 launch ydlidar_ros2_driver ydlidar_launch.py
   ```
   (Niet de Kilted workspace gebruiken)
+
+---
+
+## 🧭 Nav2 / Driver (lidar-only AMCL-aanpak, sinds 30 juli 2026)
+
+### Robot zoekt de KLEINSTE i.p.v. grootste vrije ruimte
+- **Oorzaak:** eigen `static_tf_pub_laser_ours` (`base_link→laser`) gebruikte identiteits-rotatie, maar de LiDAR zit fysiek 180° gedraaid — elk obstakel werd 180° verkeerd in de costmap geplaatst. Verklaart ook waarom AMCL nooit goed convergeerde.
+- **Fix:** static transform met `--qz 1 --qw 0` (180° yaw) i.p.v. `--qz 0 --qw 1` (identiteit) — of beter: overstappen op het officiële URDF (zie hieronder).
+
+### Nav2 logt "inflation radius smaller than inscribed radius" (ERROR)
+- **Oorzaak:** `inflation_radius: 0.2` in `hexapod_nav_params_custom.yaml`, kleiner dan de inscribed radius (0.255) van het footprint.
+- **Fix:** `inflation_radius: 0.35` in zowel `global_costmap` als `local_costmap`.
+
+### Bocht met kleine rotatie gooit de voorwaartse snelheid volledig weg
+- **Oorzaak (grote bug):** `muto_driver_fixed.py` stuurde x/y/z nooit gecombineerd — prioriteitslogica (`if z: move(0,0,z) elif x: move(x,0,0) ...`) betekende dat élke rotatie de voorwaartse snelheid kapte tot een pure draai. Ondermijnt precies waar `RegulatedPurePursuitController` op leunt (vloeiend vooruit+bijsturen combineren).
+- **Fix:** driver herschreven om **altijd** `move(lvl_x, lvl_y, lvl_z)` met alle drie de componenten tegelijk aan te roepen, exact zoals Yahboom's officiële `yahboomcar_bringup`-driver.
+
+### `/cmd_vel`-snelheid wordt genegeerd (elke beweging even hard)
+- **Oorzaak:** oudere driverversie verstuurde elk commando met hardcoded `data=15`, ongeacht de daadwerkelijke `cmd_vel`-grootte.
+- **Fix:** driver gebruikt nu de officiële `Muto`-klasse (`muto_hexapod_lib.core.MutoLibCore`) en schaalt `cmd_vel` naar levels (×100, geklemd [-30,30]).
+
+### Opeenvolgende `/cmd_vel`-commando's worden pas na ~0.45s verwerkt (niet 0.1s)
+- **Oorzaak:** de STM32-gait-cyclus is een discrete, niet-triviale-tijd kostende stap (`hexapod.move()` → `process_movement(13)`), geen continu regelbare snelheid zoals Nav2's DWB-controller aanneemt (5Hz control loop).
+- **Status:** nog niet definitief opgelost — verklaart mogelijk (een deel van) waarom zelfs een correcte controller een bewegend lookahead-punt niet nauwkeurig kan volgen. Zie `RegulatedPurePursuitController` in [SLAM_NAV2.md](../slam/SLAM_NAV2.md) voor de huidige mitigatie.
+
+### `odom_fused` wijkt tot een kwart slag af na snelle rotatie
+- **Oorzaak:** sporadisch trackingverlies van `rf2o`'s laser-scan-matching tijdens snel draaien (verschil varieerde 15°→95° tussen bijna-identieke tests — geen consistente schaalfout, dus incidenteel).
+- **Fix:** rotatiesnelheid verlagen (level 20 i.p.v. 30) verbeterde de afwijking van -49.6° naar -11.3° — gebruik level ≤20 voor rotatie in Nav2 (`rotate_to_heading_angular_vel`).
+
+---
+
+## 🎯 Rotatie & precisiebeweging (`robot_bridge.py`)
+
+### `rotate_to_angle` overschiet fors bij kleine hoeken
+- **Oorzaak:** oude formule `stop_margin = min(ROTATE_STOP_MARGIN, target * 0.5)` nam aan dat de coast (doordraaien na stopcommando) evenredig schaalt met de doelhoek. Metingen toonden het tegendeel: coast is **~11-16° vrijwel onafhankelijk van de doelhoek**. Bij kleine doelen gaf de oude formule een veel te kleine marge → tot 3× overschot.
+- **Fix:** vaste `ROTATE_STOP_MARGIN = 14.0` (geen schaling meer). Gevalideerd n=15 over 8-35°: gemiddelde afwijking van 10-17° naar **-0.8°** (std.dev ~3.1°).
+
+### `rotate_to_angle`-docstring beschreef links/rechts verkeerd om
+- **Oorzaak:** documentatiefout — de code zelf (`turn_addr = 0x17 if angle_deg > 0 else 0x16`) deed altijd al **positief=rechts, negatief=links**; de docstring zei het omgekeerde.
+- **Fix:** docstring gecorrigeerd (9 augustus 2026), geen gedragswijziging in de code.
+
+### Robot drift fors naar één kant tijdens recht vooruit lopen (kan tegen obstakels aanlopen)
+- **Metingen (n=5, 0.3m per stap):** gemiddeld **-5.2°/0.3m**, vrij consistent (std.dev ~0.86°) — systematische oorzaak (gait-/servo-asymmetrie), geen incidenteel trackingverlies. Ook aanwezig (in mindere mate, ~20°/3-4m) bij gamepad-besturing — een mens corrigeert dit onbewust continu, een los `forward()`-commando niet.
+- **Mitigatie (handmatig, sinds 7 augustus):** in batches van 0.3m lopen, na elke batch met `rotate_to_angle` terugcorrigeren naar de referentie-yaw.
+- **Fix (geautomatiseerd, 9 augustus 2026):** `POST /robot/forward` met `{"correct_drift": true, "distance_m": ...}` doet dit nu automatisch — zie `_forward_with_drift_correction()` in `software/pi/ros2/robot_bridge.py`. Standaardgedrag van `/robot/forward` blijft ongewijzigd (fire-and-forget) tenzij dit veld expliciet wordt meegegeven.
+
+### Tijd-gebaseerde `/cmd_vel`-bursts geven onvoorspelbare afstand
+- **Oorzaak:** aangenomen snelheid (`level × 0.01 m/s`) is nooit gevalideerd en klopt niet — niveau 15 is in werkelijkheid maar 0.059 m/s, ruim 2,5× langzamer dan aangenomen.
+- **Fix:** gebruik altijd de gekalibreerde `robot_bridge.py`-commando's (`distance_m`, `angle_deg`) of de onderliggende `forward()`/`turnleft()`/etc. — nooit een tijdsduur combineren met een aangenomen snelheid.
+
+---
+
+## 📦 Package-installatie verwarring
+
+### Code lezen op de Pi-host geeft een ander beeld dan wat er daadwerkelijk draait
+- **Voorbeeld:** `/home/pi/muto-llm-2.0/.../MutoLibCore.py` bevat een gepatchte `move()` met hardcoded `level=15` (uit een eerdere, deels mislukte patch-poging via `patch_mutolib.py`/`patch_mutolib2.py`, gericht op een niet-bestaand containerpad `/root/muto-llm-2.0/...`). De daadwerkelijk geïmporteerde module in `humble_run` staat op `/usr/local/lib/python3.10/dist-packages/muto_hexapod_lib/` (een fysieke kopie die de kapotte editable-install-verwijzing naar `/root/muto-llm/...` overschaduwt) en bevat de **originele, wél-werkende** `move()`.
+- **Les:** bij twijfel over welke code daadwerkelijk actief is, **altijd verifiëren in het draaiende proces zelf** (bijv. `docker exec humble_run python3 -c "import inspect; from muto_hexapod_lib.core.MutoLibCore import Muto; print(inspect.getsource(Muto.move))"`) — nooit aannemen dat een bestand op de Pi-host of in deze wiki de live versie is.
+- **Nog niet opgeruimd:** er bestaan nu minstens 3 kopieën van `MutoLibCore.py` (host-clone, wiki-mirror, live dist-packages) die uit elkaar zijn gelopen. Opschonen is een openstaand punt (zie TIMELINE "Open punten").

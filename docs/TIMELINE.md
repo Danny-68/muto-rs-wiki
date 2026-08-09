@@ -238,16 +238,75 @@ Chronologisch overzicht van alle mijlpalen, beslissingen en hardware-events.
 - **API formaat ontdekt:** `{"status": "success", "plan": [{"id": "1", "command": "forward(speed=15, duration=2)"}]}`
 - **Beschikbare robot functies:** `forward()`, `backward()`, `shift_left()`, `shift_right()`, `rotate()`, `stop()`, `adjust_height()`, `have_a_look()`, en meer
 
+### (medio juli, exacte datum niet vastgelegd) — RTAB-Map/Jetson roadmap on hold
+- Uitgebreid gemeten (`ros2 topic hz`/`bw` op `/rgbd_image`, herhaalde `uptime`, `vcgencmd get_throttled`/`measure_temp`) tijdens gecombineerd Pi+Jetson RTAB-Map-gebruik — signalen van te hoge belasting.
+- `/rgbd_image` teruggebracht naar 3Hz via `topic_tools throttle` als tegenmaatregel — onvoldoende verbetering.
+- **Beslissing:** `switch_to_yahboom.sh` gebruikt om over te schakelen naar een lidar-only aanpak zonder Jetson/camera-afhankelijkheid. RTAB-Map/Jetson-pad blijft *on hold*, niet verwijderd — zie [PROBLEMS.md](../problems/PROBLEMS.md#rtab-map--slam) voor de heropname-voorwaarde.
+
 ---
 
-## 🔮 Open punten (op moment van schrijven)
+## Juli–Augustus 2026 — Nav2 live-debugsessies (lidar-only, geen Jetson)
+
+> Vanaf hier is de aanpak: officieel URDF + AMCL + lidar-only (Pi-alleen), i.p.v. RTAB-Map/Jetson. Zie [SLAM_NAV2.md](../slam/SLAM_NAV2.md) voor de volledige, actuele procedure.
+
+### 30 juli — Drie echte bugs gevonden en opgelost
+- **Laser-TF 180° verkeerd om:** verklaart het herhaaldelijk waargenomen patroon dat de robot de kleinste i.p.v. grootste vrije ruimte opzoekt. Fix: 180°-yaw op de static transform.
+- **`inflation_radius` (0.2) kleiner dan inscribed radius (0.255):** Nav2 gaf dit expliciet als ERROR. Fix: `inflation_radius: 0.35`.
+- **Driver negeerde `cmd_vel`-snelheid:** elke beweging ging met hardcoded level 15. Fix: nieuwe driver op de officiële `MutoLibCore.Muto`-klasse, schaalt naar levels.
+- **Nieuwe observatie:** discrete gait-cyclus (~0.45s per commando) i.p.v. continue snelheid — fundamenteel ander bewegingsmodel dan Nav2's DWB-controller aanneemt.
+
+### 30 juli — Audit tegen Yahboom's officiële stack
+- Yahboom gebruikt een volledig **URDF-model** (wij: handmatige static transforms) — bevat letterlijk de 180°-laser-correctie die we net empirisch hadden gevonden.
+- **YDLidar `reversion`-mismatch:** Yahboom zet `reversion: True` voor het 4ROS-pad, wij hadden `false`.
+- **EKF mist IMU-oriëntatiefusie:** Yahboom fuseert absolute yaw + yaw-rate, wij alleen yaw-rate (onze IMU publiceert geen orientation).
+- Controller gewisseld: DWB → `RegulatedPurePursuitController` + rechthoekig footprint — meetbare verbetering, robot maakte voor het eerst echte voortgang richting doel.
+- **Bevinding:** `odom_fused` wijkt tot een kwart slag af na snelle rotatie (sporadisch `rf2o`-trackingverlies, geen consistente schaalfout). Lagere rotatiesnelheid (level 20 i.p.v. 30) verbeterde dit van -49.6° naar -11.3° afwijking.
+- **Herontdekt:** het rotatie-drift-probleem was al opgelost in `robot_bridge.py` (STM32-onboard-yaw + vaste overshoot-marge) — een ander, onafhankelijk systeem dan de rf2o/EKF-aanpak van vandaag.
+
+### 31 juli — Koude start: officieel URDF ingevoerd
+- `robot_state_publisher` + `joint_state_publisher` met Yahboom's officiële `Muto.urdf` vervangt de handmatige static transforms.
+- Tegelijk `reversion: false → true` in `ydlidar.yaml` (hoort bij de URDF-overstap, zie PROBLEMS.md-nuance).
+- **Losse bevinding:** 90°-brede blinde sector in de lidar-scan bleek een fysiek losse stekker, geen software-bug.
+
+### 31 juli — Nav2 + AMCL-procedure + grote driverbug gefixt
+- AMCL-lokalisatieprocedure zonder Foxglove-kennis uitgewerkt: `/reinitialize_global_localization` + gedoseerde rotatie-bursts + kaart-screenshot-correctie + laser-raycast-verificatie.
+- **Grote bug gevonden en gefixt:** driver stuurde x/y/z nooit gecombineerd — elke kleine rotatie in een Nav2-commando gooide de voorwaartse snelheid volledig weg. Nu altijd `move(x,y,z)` gecombineerd, zoals Yahboom's officiële driver.
+
+### 31 juli — Door de deuropening: gait-ontdekking + bijna-aanvaring
+- **Fine-scan-techniek** ontwikkeld: deuropeningen precies lokaliseren via laser-scan-sprongen (herbruikbaar voor elke doorgang).
+- **Kern-ontdekking:** `move()`'s aangenomen snelheid (level×0.01 m/s) was nooit gevalideerd en klopt niet (niveau 15 = 0.059 m/s, niet 0.15 m/s). Een bestaande, geverifieerde kalibratietabel (`robot_config.json`) en `robot_bridge.py`'s gekalibreerde `distance_m`/`rotate_to_angle`-commando's bleken al te bestaan.
+- **Bijna-aanvaring:** eerste documentatie van yaw-drift tijdens *recht vooruit* lopen (eerder alleen bekend tijdens draaien) — robot dreigde tegen een deurpost te draaien, gebruiker greep bijna in. Hersteld met `rotate_to_angle`, daarna kleine geverifieerde stappen — robot bereikte de gang.
+- Robot fysiek veilig, doel van de sessie gehaald.
+
+### 7 augustus — Forward-drift gekwantificeerd, rotate_to_angle-bug gefixt
+- **Forward-yaw-drift gekwantificeerd** (n=5): gemiddeld **-5.2°/0.3m**, consistent (std.dev ~0.86°) — systematische oorzaak.
+- **`rotate_to_angle`-overshoot-model fundamenteel fout:** coast bleek ~11-16° vrijwel onafhankelijk van de doelhoek, niet evenredig zoals de oude formule aannam. Fix: vaste marge (14°) i.p.v. schaling. Gevalideerd n=15: gemiddelde afwijking van 10-17° naar **-0.8°**.
+- **Batch-correctie tijdens lopen:** elke 2-3 stappen (~0.3m) laten drift accumuleren, dan één `rotate_to_angle`-correctie — werkte, robot **tweede keer succesvol door de deur**.
+- **Gevonden, nog niet gefixt:** docstring-bug in `rotate_to_angle()` (links/rechts stond verkeerd om beschreven — code zelf was altijd al correct).
+
+### 9 augustus — Codeaudit: bugs ontkracht/gefixt, robot_bridge.py uitgebreid
+- **`MutoLibCore.move()`'s hardcoded `level=15`** (leek een grote onopgeloste bug) bleek **geen bug in het draaiende systeem** — de daadwerkelijk geïmporteerde module (`dist-packages`, niet de host-clone) heeft de originele, wél-werkende `move()`. Wel een reële package-installatie-verwarring blootgelegd (3 kopieën uit elkaar gelopen, zie PROBLEMS.md).
+- **IMU-magnetometerfusie:** rootcause bevestigd (ongevalideerde as-remap-aanname + geen hard/soft-iron-kalibratie + mogelijke servo-interferentie) — fix nog niet geïmplementeerd.
+- **RTAB-Map/`slam_toolbox`-alternatieven geëvalueerd:** `hexapod_slam_localization.launch.py` lost het "automatisch heroriënteren"-probleem niet op (zelfde vaste-start-pose-beperking als AMCL). `rtabmap_localization_launch.py` zou dat wél kunnen, maar er bestaat nergens een `rtabmap.db` — vereist eerst een volledige nieuwe mapping-sessie.
+- **Forward-drift-correctie geautomatiseerd:** `_forward_with_drift_correction()` toegevoegd aan `robot_bridge.py`, opt-in via `POST /robot/forward {"correct_drift": true, "distance_m": ...}`.
+- **`robot-bridge.service`** (systemd) aangemaakt — bewust *disabled* i.p.v. auto-start, want `app_muto.py` start al automatisch op via `~/.config/autostart/app.desktop` en deelt dezelfde seriële poort.
+- **Docstring-fix** `rotate_to_angle()` (links/rechts).
+- **OLED-scherm bevestigd werkend** (was onduidelijk gedocumenteerd sinds de sessie van 26 juni) — hardware + driver + autostart intact, gebruiker bevestigde leesbare data op het scherm.
+
+---
+
+## 🔮 Open punten (bijgewerkt 9 augustus 2026)
 
 | Prioriteit | Taak |
 |---|---|
-| 🔴 Hoog | Nav2 autonoom navigeren volledig debuggen |
-| 🔴 Hoog | `app_muto.py` permanent uitschakelen bij boot |
-| 🟡 Midden | `foot_contact.py` integreren in muto_driver_fixed.py als ROS2 node |
-| 🟡 Midden | EKF op Jetson draaien (Pi CPU verlichten) |
-| 🟡 Midden | Dify vision workflow (`have_a_look`) correct configureren |
-| 🟢 Laag | IMU EKF fusie verder verfijnen |
-| 🟢 Laag | Seeed reComputer J3010 overwegen voor compacte Jetson integratie |
+| 🔴 Hoog | `app_muto.py` permanent uitschakelen bij boot (start nu nog automatisch via `~/.config/autostart/app.desktop`, botst met `robot_bridge.py`/ROS-driver) |
+| 🔴 Hoog | IMU-magnetometer hard/soft-iron-kalibratie + as-remap valideren (rootcause bekend, fix nog niet geïmplementeerd) |
+| 🟡 Midden | Live valideren van de nieuwe `correct_drift`-forward-correctie en de `rotate_to_angle`-docstring-fix op de robot |
+| 🟡 Midden | Links/rechts-asymmetrie in `rotate_to_angle`-nauwkeurigheid bevestigen (meer herhalingen nodig, n=6 vs n=9 tot nu toe) |
+| 🟡 Midden | Coast-model bij hoeken <14° apart modelleren (nu nog vaste marge, kleine ondershoot-nuance bij hele kleine doelen) |
+| 🟡 Midden | 3 uiteenlopende kopieën van `MutoLibCore.py` (host-clone, wiki-mirror, live dist-packages) opschonen |
+| 🟢 Laag | `hexapod_slam_localization.launch.py`/`rtabmap_localization_launch.py` verder bekijken als er ooit een RTAB-Map-database wordt opgebouwd |
+| 🟢 Laag | RTAB-Map/Jetson-pad alleen heroverwegen bij een lichtere/lokale variant zonder Jetson (zie PROBLEMS.md) |
+| 🟢 Laag | `foot_contact.py` integreren in muto_driver_fixed.py als ROS2 node |
+| 🟢 Laag | Dify vision workflow (`have_a_look`) correct configureren |
+| 🟢 Laag | Discrete gait-cyclus (~0.45s/commando) — uitzoeken of een snellere aanroepmethode bestaat binnen `muto_hexapod_lib` |

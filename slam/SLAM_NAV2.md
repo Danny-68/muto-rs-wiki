@@ -2,7 +2,55 @@
 
 ---
 
-## Opstartscript (enkelvoudig commando)
+## 🟢 HUIDIGE AANPAK (sinds 30 juli 2026): lidar-only AMCL, geen Jetson
+
+> Het RTAB-Map/Jetson-gedeelte verderop in dit document is **on hold** sinds medio juli 2026 wegens Pi/Jetson/WiFi-belasting (zie [PROBLEMS.md](../problems/PROBLEMS.md#rtab-map--slam)). Dit is de actieve, geverifieerde aanpak.
+
+### Opstarten
+```bash
+# 🐧 PI TERMINAL — start lidar, robot_state_publisher (officieel URDF), rf2o, EKF, driver
+sudo bash /home/pi/muto_fase1_start.sh
+
+# Daarna Nav2 met de bestaande kaart:
+ros2 launch hexapod_nav hexapod_navigation.launch.py \
+  map:=/root/maps/lidar_only_map.yaml \
+  params_file:=/root/hexapod_nav_params_custom.yaml
+```
+**Vóór start:** `pkill -f app_muto.py` (bezet anders `/dev/myserial`, zie README-regel 7).
+
+### Kernonderdelen
+| Onderdeel | Wat | Waarom |
+|---|---|---|
+| **Officieel URDF** (`robot_state_publisher` + `joint_state_publisher`, Yahboom's `Muto.urdf`) | Vervangt handmatige `static_transform_publisher`-commando's | Bevat de al-bekende 180°-laser-correctie; voorkomt de TF-fouten die met handmatige transforms zijn gemaakt |
+| `ydlidar.yaml`: `reversion: true` | Hoort bij het officiële URDF (zie PROBLEMS.md-nuance) | Yahboom's eigen 4ROS-launch gebruikt exact deze combinatie |
+| **`RegulatedPurePursuitController`** i.p.v. DWB | `FollowPath`-plugin in `hexapod_nav_params_custom.yaml`, params overgenomen van Yahboom's `nav2_kilted.yaml` | Vermijdt DWB's rotate-then-translate-oscillatie; rotatie pas geforceerd bij >45° koersfout |
+| Rechthoekig footprint `[[0.14,0.11],[0.14,-0.11],[-0.14,-0.11],[-0.14,0.11]]` + `inflation_radius: 0.35` | i.p.v. cirkelvormig `robot_radius` | Past beter bij de langwerpige hexapod-vorm; 0.35 voorkomt Nav2's "inflation smaller than inscribed radius"-ERROR |
+| `muto_driver_fixed.py` v5/v6 | Combineert **altijd** x/y/z in één `move()`-aanroep | Voorkomt dat rotatie de voorwaartse snelheid wegkaapt (zie PROBLEMS.md) |
+
+### AMCL-lokalisatieprocedure (zonder Foxglove-kennis nodig)
+1. `ros2 service call /reinitialize_global_localization std_srvs/srv/Empty '{}'`
+2. Gedoseerde rotatie-bursts sturen (`angular.z=0.25`, ~2s, met stop erna) — kleiner dan `update_min_a: 0.2 rad` (~11.5°) geeft géén nieuwe AMCL-schatting, dus bursts ruim daarboven houden.
+3. Positie convergeert meestal vlot; **yaw convergeert soms niet vanzelf** (lokale kaartsymmetrie of rf2o-onbetrouwbaarheid).
+4. Bij vastlopende yaw: gemarkeerde kaartafbeelding genereren (rode stip+pijl op AMCL-schatting) en de gebruiker een koerscorrectie laten inschatten → als nieuwe, striktere `/initialpose`-prior toepassen.
+5. **Verificatie:** live `/scan_fixed` op 0°/90°/180°/270° vergelijken met een raycast tegen de `.pgm`-kaart vanaf de huidige AMCL-pose — grote afwijkingen op meerdere richtingen = echte lokalisatiefout.
+
+### Precisiebeweging (geen Nav2, directe STM32-aansturing)
+Voor kleine, nauwkeurige stappen (bijv. door een deuropening) is `robot_bridge.py` (Flask, port 5000) betrouwbaarder dan Nav2/`cmd_vel`-bursts:
+- `POST /robot/forward {"distance_m": 0.3, "correct_drift": true}` — gekalibreerde afstand + automatische yaw-drift-correctie (sinds 9 aug 2026).
+- `POST /robot/rotate_to_angle {"angle_deg": ...}` — closed-loop rotatie op de STM32-onboard-yaw, nauwkeuriger dan `rf2o`/EKF tijdens snelle rotatie.
+- **Nooit** tijdsduur combineren met een aangenomen snelheid (`level × 0.01 m/s` klopt niet, zie PROBLEMS.md) — gebruik altijd de gekalibreerde commando's.
+- **Nooit** tegelijk met `muto_driver_fixed.py`/`app_muto.py` — delen `/dev/myserial`.
+
+### Bekende, nog niet opgeloste beperking
+De STM32-gaitcyclus verwerkt commando's in discrete stappen van ~0.45s, niet continu zoals Nav2's DWB/Pure-Pursuit-controllers (5Hz) aannemen. Verklaart mogelijk waarom zelfs een correcte controller een bewegend lookahead-punt niet nauwkeurig kan volgen. Zie [PROBLEMS.md](../problems/PROBLEMS.md#-nav2--driver-lidar-only-amcl-aanpak-sinds-30-juli-2026).
+
+---
+
+## ⏸️ GEPAUZEERD: RTAB-Map + Jetson (camera-based, dual-board)
+
+> On hold sinds medio juli 2026 — Pi/Jetson/WiFi-belasting te hoog gebleken (zie PROBLEMS.md). Onderstaande inhoud blijft staan voor het geval een lichtere/lokale variant zonder Jetson ooit haalbaar blijkt; **niet de huidige aanpak.**
+
+### Opstartscript (enkelvoudig commando)
 
 ```bash
 # 🐧 PI TERMINAL

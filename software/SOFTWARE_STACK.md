@@ -33,19 +33,33 @@ De robot heeft twee modi die **niet tegelijk** kunnen draaien op port 8080:
 ```
 GET  /health                    Systeem status
 GET  /robot/imu                 Yaw, pitch, roll via STM32
-POST /robot/forward             Vooruit (speed, duration_s)
+POST /robot/forward             Vooruit (step, distance_m/steps/time_s)
+                                 + optioneel "correct_drift": true (sinds 9 aug 2026) —
+                                 loopt in batches van 0.3m, corrigeert na elke batch
+                                 automatisch de forward-yaw-drift (~-5.2°/0.3m) via
+                                 rotate_to_angle(). Blokkerend, retourneert per-batch info.
+                                 Zonder dit veld: ongewijzigd fire-and-forget gedrag.
 POST /robot/backward            Achteruit
+POST /robot/left / /right       Zijwaarts
 POST /robot/stop                Stop
-POST /robot/rotate              Graden roteren
-POST /robot/rotate_to_angle     IMU gesloten-lus rotatie
+POST /robot/rotate_left/right   Ongekalibreerd, vaste richting
+POST /robot/rotate_to_angle     IMU gesloten-lus rotatie (STM32-onboard-yaw,
+                                 ROTATE_STOP_MARGIN=14.0 vaste coast-compensatie,
+                                 gevalideerd n=15, gem. afwijking -0.8°)
 GET  /lidar/obstacle            Hindernis detectie
 GET  /camera/depth/obstacle     Diepte hindernis
 GET  /camera/describe           Visuele beschrijving
+GET  /robot/status              speed_table, default_step, gait/voice status
 ```
+
+> **Docstring-fix (9 aug 2026):** `rotate_to_angle()` beschreef "positief = links" — was altijd al **positief = rechts, negatief = links** in de code zelf. Alleen de documentatie was fout, geen gedragswijziging.
 
 ### Starten
 ```bash
 sudo bash /home/pi/switch_to_own_stack.sh
+
+# Of als systemd-service (bewust NIET auto-start, zie setup/systemd/robot-bridge.service):
+sudo systemctl start robot-bridge   # eerst: pkill -f app_muto.py
 ```
 
 ---
@@ -63,6 +77,8 @@ sudo bash /home/pi/switch_to_own_stack.sh
 ```
 /usr/local/lib/python3.10/dist-packages/__editable___muto_hexapod_lib_1_0_0_finder.py
 ```
+
+> **⚠️ Package-installatie-verwarring (ontdekt 9 aug 2026):** de editable-install-verwijzing hierboven wijst naar `/root/muto-llm/...` (bestaat niet meer op die plek — waarschijnlijk verplaatst naar `muto-llm-2.0` zonder de pip-link bij te werken). De daadwerkelijk geïmporteerde `muto_hexapod_lib` in `humble_run` is een **fysieke kopie** in dezelfde `dist-packages`-map (van 9 juli) die deze kapotte editable-link overschaduwt. Er bestaan nu minstens 3 uiteenlopende kopieën van `MutoLibCore.py` (host-clone `/home/pi/muto-llm-2.0/...`, deze wiki's `software/container/stackB/MutoLibCore.py`, en de live `dist-packages`-kopie) — **verifieer bij twijfel altijd met `inspect.getsource()` in het draaiende proces**, zie [PROBLEMS.md](../problems/PROBLEMS.md#-package-installatie-verwarring). Opschonen is nog een openstaand punt.
 
 ### Kritieke bestanden
 
@@ -198,12 +214,14 @@ leg.move_tip(pos)        # ENIGE correcte servo interface
 
 | Script | Locatie | Functie |
 |---|---|---|
-| `muto_rtabmap_start.sh` | `/home/pi/` | Volledige RTAB-Map + Nav2 stack (9 stappen) |
+| `muto_fase1_start.sh` | `/home/pi/` | **Huidige aanpak:** officieel URDF + lidar-only AMCL-stack opstarten (geen Jetson) |
+| `muto_rtabmap_start.sh` | `/home/pi/` | ⏸️ RTAB-Map + Nav2 stack (9 stappen) — on hold, zie PROBLEMS.md |
 | `switch_to_yahboom.sh` | `/home/pi/` | Switch naar Stack B |
 | `switch_to_own_stack.sh` | `/home/pi/` | Switch naar Stack A |
 | `rtabmap_restart.sh` | `/home/pi/` | Veilig alleen rtabmap_slam herstarten |
-| `muto_jetson_start.sh` | `/home/Danny/` (Jetson) | Jetson stack (5 stappen) |
+| `muto_jetson_start.sh` | `/home/Danny/` (Jetson) | ⏸️ Jetson stack (5 stappen) — on hold |
 | `start_llama.bat` | `D:\llama.cpp\` | llama.cpp server starten (Windows) |
+| `robot-bridge.service` | `/etc/systemd/system/` | systemd-unit voor `robot_bridge.py` (bewust disabled, zie regel 7 in README) |
 
 ---
 

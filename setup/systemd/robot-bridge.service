@@ -1,0 +1,18 @@
+[Unit]
+Description=Muto RS robot_bridge.py — Flask/HTTP bridge naar STM32-serieel
+Documentation=file:///home/pi/muto_inventarisatie.md
+After=network.target
+# LET OP: nooit gelijktijdig starten met app_muto.py of muto_driver_fixed.py --
+# alle drie gebruiken exclusief /dev/myserial. app_muto.py start automatisch
+# op via ~/.config/autostart/app.desktop, dus stop die eerst handmatig.
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+ExecStart=/usr/bin/python3 /home/pi/robot_bridge.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

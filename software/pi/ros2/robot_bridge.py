@@ -130,7 +130,11 @@ def _yaw_delta(from_yaw, to_yaw):
 
 # Rotatie-parameters
 ROTATE_STEP          = 10     # kleine stap = langzaam draaien = preciezere stop
-ROTATE_STOP_MARGIN   = 20.0   # graden voor het doel stoppen (globale uitloop-compensatie)
+# Vaste coast-compensatie (graden): empirisch gemeten 2026-08-07 (n=4: -30 uit eerdere
+# sessie + 5.2/11.83/19.17 vandaag) dat de robot na het stopcommando ~11-16 graden
+# doordraait (gem. 13.9), ONAFHANKELIJK van de doelhoek. De oude formule (target*0.5)
+# schatte deze marge bij kleine doelen veel te laag in, wat forse overshoot gaf.
+ROTATE_STOP_MARGIN   = 14.0
 ROTATE_TIMEOUT_S     = 25.0   # veiligheidslimiet, nooit langer draaien dan dit
 ROTATE_POLL_S        = 0.02   # pauze tussen yaw-metingen tijdens draaien
 ROTATE_SETTLE_S      = 0.4    # wachttijd na stop zodat de robot echt stilstaat
@@ -138,14 +142,15 @@ ROTATE_SETTLE_S      = 0.4    # wachttijd na stop zodat de robot echt stilstaat
 def rotate_to_angle(angle_deg: float) -> dict:
     """
     Draait de robot closed-loop over 'angle_deg' graden.
-    Positief = naar links (0x16), negatief = naar rechts (0x17).
+    Positief = naar rechts (0x17), negatief = naar links (0x16).
     """
     target = abs(float(angle_deg))
     if target < 1.0:
         return {"ok": True, "action": "rotate_to_angle", "requested_deg": angle_deg,
                 "turned_deg": 0.0, "note": "hoek te klein, genegeerd"}
 
-    stop_margin = min(ROTATE_STOP_MARGIN, target * 0.5)
+    stop_margin       = ROTATE_STOP_MARGIN
+    below_resolution  = target <= stop_margin
     turn_addr   = 0x17 if angle_deg > 0 else 0x16
     direction   = "rechts" if angle_deg > 0 else "links"
 
@@ -193,7 +198,7 @@ def rotate_to_angle(angle_deg: float) -> dict:
 
     turned    = abs(cumulative)
     overshoot = round(turned - target, 1)
-    return {
+    result = {
         "ok": True,
         "action": "rotate_to_angle",
         "direction": direction,
@@ -203,6 +208,13 @@ def rotate_to_angle(angle_deg: float) -> dict:
         "start_yaw": round(start_yaw, 1),
         "end_yaw": round(end_yaw, 1) if end_yaw is not None else None,
     }
+    if below_resolution:
+        result["note"] = (
+            f"doelhoek ({target}°) kleiner dan gemeten minimum-coast "
+            f"({stop_margin}°) — resultaat wordt gedomineerd door "
+            "mechanisme-resolutie, niet door regelnauwkeurigheid"
+        )
+    return result
 
 # ------------------------------------------------------------------ #
 #  Snelheidskalibratie                                                 #
@@ -271,6 +283,64 @@ def _start_move(addr, body: dict) -> dict:
         daemon=True
     ).start()
     return {"step": step, "duration": duration, "speed_m_per_s": round(speed, 4)}
+
+# ------------------------------------------------------------------ #
+#  Forward-yaw-drift auto-correctie (debug-briefing sectie 18.1/18.5)  #
+# ------------------------------------------------------------------ #
+
+# Gemeten 2026-08-07 (n=5): rechtdoor lopen drift gemiddeld -5.2 graden per 0.3m,
+# vrij consistent (std.dev ~0.86 graden) -- systematische oorzaak (gait-/
+# servo-asymmetrie), geen incidenteel trackingverlies. Batch van 0.3m is wat
+# destijds handmatig werkte (18.5); dit automatiseert diezelfde aanpak.
+FORWARD_DRIFT_BATCH_M     = 0.3
+FORWARD_DRIFT_MIN_CORRECT = 1.5  # graden -- kleinere afwijkingen niet de moeite waard
+
+def _read_yaw_once():
+    with _serial_lock:
+        with serial.Serial(SERIAL_PORT, BAUD, timeout=1) as ser:
+            time.sleep(0.1)
+            _read_yaw_retry(ser)
+            return _read_yaw_retry(ser)
+
+def _forward_batch(step: int, batch_m: float, speed: float):
+    duration = min(batch_m / speed, SAFETY_CAP_S)
+    with _serial_lock:
+        with serial.Serial(SERIAL_PORT, BAUD, timeout=1) as ser:
+            ser.write(make_cmd(0x12, step))
+            time.sleep(duration)
+            ser.write(make_cmd(0x11, 0x00))
+            time.sleep(ROTATE_SETTLE_S)
+            return _read_yaw_retry(ser)
+
+def _forward_with_drift_correction(step: int, total_distance_m: float) -> dict:
+    """
+    Vooruit lopen in kleine batches, met na elke batch een rotate_to_angle()-
+    correctie (STM32-onboard-yaw, closed-loop) terug naar de referentie-yaw.
+    Automatiseert de handmatige batch-aanpak uit sectie 18.5.
+    """
+    speed   = get_speed_for_step(step)
+    ref_yaw = _read_yaw_once()
+    if ref_yaw is None:
+        return {"ok": False, "error": "kon referentie-yaw niet lezen"}
+
+    remaining = float(total_distance_m)
+    batches   = []
+    while remaining > 1e-6:
+        batch_m = min(FORWARD_DRIFT_BATCH_M, remaining)
+        yaw     = _forward_batch(step, batch_m, speed)
+        remaining -= batch_m
+
+        entry = {"batch_m": round(batch_m, 3)}
+        if yaw is None:
+            entry["warning"] = "kon yaw niet lezen na deze batch"
+        else:
+            drift = _yaw_delta(ref_yaw, yaw)
+            entry["drift_deg"] = round(drift, 1)
+            if abs(drift) >= FORWARD_DRIFT_MIN_CORRECT:
+                entry["correction"] = rotate_to_angle(-drift)
+        batches.append(entry)
+
+    return {"ok": True, "corrected": True, "reference_yaw": round(ref_yaw, 1), "batches": batches}
 
 # ------------------------------------------------------------------ #
 #  Spraakcommando poller                                               #
@@ -514,6 +584,15 @@ def stop():
 @app.route("/robot/forward", methods=["POST"])
 def forward():
     body = request.json or {}
+    if body.get("correct_drift"):
+        try:
+            distance = float(body["distance_m"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"ok": False, "error": "correct_drift vereist distance_m"}), 400
+        step   = max(10, min(25, int(body.get("step", DEFAULT_STEP))))
+        result = _forward_with_drift_correction(step, distance)
+        status = 200 if result.get("ok") else 500
+        return jsonify({"action": "forward", **result}), status
     info = _start_move(0x12, body)
     return jsonify({"ok": True, "action": "forward", **info})
 
