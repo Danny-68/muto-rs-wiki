@@ -10,6 +10,7 @@
 | Document | Inhoud |
 |---|---|
 | [📅 TIMELINE.md](docs/TIMELINE.md) | Chronologisch overzicht van alle mijlpalen (juni–augustus 2026) |
+| [🗺️ ROADMAP.md](docs/ROADMAP.md) | Overkoepelend overzicht: autonome navigatie + Dify + Jetson-AI, wat werkt, wat nog moet |
 | [🔧 HARDWARE.md](hardware/HARDWARE.md) | Geometrie, poot volgorde, udev, TF waarden, Jetson specs |
 | [📡 PROTOCOL.md](hardware/PROTOCOL.md) | STM32 protocol, alle commando’s, CSPower, API formaten |
 | [💾 SOFTWARE_STACK.md](software/SOFTWARE_STACK.md) | Stack A/B, containers, scripts, llama.cpp, Dify |
