@@ -362,3 +362,29 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
 - **Voorbeeld:** `/home/pi/muto-llm-2.0/.../MutoLibCore.py` bevat een gepatchte `move()` met hardcoded `level=15` (uit een eerdere, deels mislukte patch-poging via `patch_mutolib.py`/`patch_mutolib2.py`, gericht op een niet-bestaand containerpad `/root/muto-llm-2.0/...`). De daadwerkelijk geïmporteerde module in `humble_run` staat op `/usr/local/lib/python3.10/dist-packages/muto_hexapod_lib/` (een fysieke kopie die de kapotte editable-install-verwijzing naar `/root/muto-llm/...` overschaduwt) en bevat de **originele, wél-werkende** `move()`.
 - **Les:** bij twijfel over welke code daadwerkelijk actief is, **altijd verifiëren in het draaiende proces zelf** (bijv. `docker exec humble_run python3 -c "import inspect; from muto_hexapod_lib.core.MutoLibCore import Muto; print(inspect.getsource(Muto.move))"`) — nooit aannemen dat een bestand op de Pi-host of in deze wiki de live versie is.
 - **Nog niet opgeruimd:** er bestaan nu minstens 3 kopieën van `MutoLibCore.py` (host-clone, wiki-mirror, live dist-packages) die uit elkaar zijn gelopen. Opschonen is een openstaand punt (zie TIMELINE "Open punten").
+
+
+## 🦾 Gait / phoenix_gait.py
+
+### Robot beweegt niet vooruit tijdens tripod-gait (poten bewegen wel)
+- **Oorzaak:** `_foot_delta()` roteerde de translatierichting (`tx`, `tz`) met de mount-hoek van elke individuele poot (`MOUNT_RAD[leg]`) i.p.v. een gezamenlijke wereldrichting te gebruiken. Elke poot duwde daardoor radiaal t.o.v. zijn eigen montagehoek; de netto krachten heffen elkaar op en het lichaam verplaatst niet, ook al bewegen de poten zichtbaar (lift, heen-en-weer).
+- - **Fix:** translatie loskoppelen van de mount-hoek, vaste wereldrichting voor alle poten (+x=rechts, +y=voorwaarts):
+  -   ```python
+        def _foot_delta(self, leg, gait, tx, tz, rot):
+            nx, ny, _ = NEUTRAL_POS[leg]
+            dx = gait.step_length * tz
+            dy = gait.step_length * tx
+            rot_scale = gait.step_length * 0.6
+            rx = -ny * rot * rot_scale / max(math.hypot(nx, ny), 1)
+            ry =  nx * rot * rot_scale / max(math.hypot(nx, ny), 1)
+            return (dx + rx, dy + ry)
+        ```
+        Rotatie-component (`rx, ry`) was al correct en hoeft niet aangepast — die gebruikt bewust de pootpositie voor tangentiële beweging.
+      - **Bevestigd op hardware:** 10 augustus 2026, tripod-gait + sway. Zie GAIT.md voor volledige context en testresultaten per gaittype.
+   
+      - ### `/home/pi/phoenix_gait.py` teruggevallen op oudere versie (regressie)
+      - - **Symptoom:** ontbrekende functionaliteit die eerder al werkend was: continu fasemodel (50Hz), sinusoidale easing op horizontale beweging, centipede-gait, biologische verbeteringen (body dip, snelheidsafhankelijke lift, accel/decel), servo hardware-interpolatie (exec-time register 0x2C).
+        - - **Oorzaak:** niet met zekerheid vastgesteld — vermoedelijk verloren tijdens een eerdere consolidatiepoging (tripod + centipede samenvoegen in één bestand).
+          - - **Fix:** reconstructie op basis van projectgeschiedenis (10 augustus 2026). **Let op:** centipede leg-offsets (`[4/6, 2/6, 0/6, 1/6, 5/6, 3/6]`) zijn na deze reconstructie nog niet opnieuw op hardware bevestigd.
+            - - **Les:** bij twijfel over de actuele staat van een script, eerst het bestand volledig inlezen en vergelijken met eerdere sessies voordat je een losse bug fixt — een geïsoleerde patch op een geregresseerd bestand lost het symptoom niet op.
+              - 
