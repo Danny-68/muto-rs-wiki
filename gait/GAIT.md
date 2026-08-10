@@ -123,7 +123,7 @@ yaw_deg = yaw_raw / 100.0
 
 | Bestand | Locatie | Beschrijving |
 |---|---|---|
-| `phoenix_gait.py` | `/root/phoenix_gait.py` (container) | Tripod + Centipede gait |
+| `phoenix_gait.py` | `/root/phoenix_gait.py` (container) | Tripod + Ripple + Wave + Centipede gait (centipede-offsets ongevalideerd sinds 10 aug reconstructie) |
 | `centipede_gait.py` | `/root/centipede_gait.py` | Standalone centipede |
 | `foot_contact.py` | `/home/pi/foot_contact.py` | Voetcontact detectie |
 | `muto_controller.py` | `/home/pi/muto_controller.py` | Joystick controller |
