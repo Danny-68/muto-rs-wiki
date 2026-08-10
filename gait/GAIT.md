@@ -256,3 +256,66 @@ op de Pi.
 `eff_lift_scale` (snelheidsafhankelijke lift) wordt in `foot_targets()`
 berekend maar nergens toegepast op `gait.lift_height` — dit is een
 onafgemaakt onderdeel van de reconstructie, geen nieuwe regressie.
+
+
+---
+
+## Yaw-drift meting phoenix_gait.py tripod (10 augustus 2026)
+
+Methodologie: schone karakterisering, geen auto-correctie, handmatig
+heading-reset + terugkeer naar startpunt tussen reps (mirrort de
+STM32-gait yaw-drift tests). Vloeiende stop-sequentie: decel binnen de
+gait (target_speed → 0, laatste stap remt uit i.p.v. abrupt te stoppen
+midden-swing) gevolgd door sinusoidale interpolatie naar NEUTRAL_POS —
+geen instant snap meer.
+
+### Kalibratie afstand
+
+step_length=60mm in de GaitParams suggereert ~60mm/cyclus, maar gemeten
+resultaat is ~9.5cm/cyclus (76cm over 8 cycli) — sway+dip zorgen
+kennelijk voor meer effectieve voortgang per cyclus dan de kale
+step_length-parameter alleen. **5.3 cycli ≈ 50cm**, empirisch bevestigd
+(meerdere reps kwamen uit op 50-52cm).
+
+### Resultaten (tripod-gait, 5.3 cycli ≈ 50cm, sway=aan)
+
+| Richting | Reps | Individuele drift | Gemiddelde | Std.dev |
+|---|---|---|---|---|
+| Vooruit | n=3 | +3.04°, +2.82°, +2.54° | **+2.80°** | ~0.25° |
+| Achteruit | n=3 | -1.38°, -1.78°, -0.92° | **-1.36°** | ~0.43° |
+
+(één meetartefact genegeerd: een rep gaf yaw_before=217.6° en een
+volgende rep crashte op een lege IMU-read — beide toegeschreven aan een
+serieel-poort-conflict met `app_muto.py`, dat op dat moment nog niet was
+gestopt. Zie "Bekende valkuil" hieronder.)
+
+**Interpretatie:** fors beter dan de STM32-firmware-gait (0x12-0x17),
+die -8° tot -16° vooruit en +2.8°/+4.7° achteruit gaf over vergelijkbare
+afstand (zie PROBLEMS.md, sectie Rotatie & precisiebeweging). Zelfde
+asymmetrie-patroon (tegengesteld teken vooruit/achteruit) als bij de
+firmware-gait — wijst op een structureel verschil in pootbelasting
+tussen voor- en achterwaartse tripod-cyclus, niet toevallig. Kwalitatief
+bevestigd: bij achteruit lopen kwam de robot precies op de oorspronkelijke
+startpositie uit.
+
+**Kanttekening:** n=3 per richting is een eerste indicatie, geen
+definitieve validatie — zelfde niveau van voorzichtigheid als bij de
+vroege STM32-metingen aanhouden voordat dit als vaststaand feit wordt
+behandeld.
+
+### Bekende valkuil: serieel-poort-conflict met app_muto.py
+
+`phoenix_gait.py` (en scripts die het importeren, zoals
+`phoenix_yaw_drift_test.py`) openen `/dev/myserial` direct. Als
+`app_muto.py` nog draait (autostart na koude boot), corrumpeert dat de
+serial-buffer — symptoom: absurde yaw-sprongen (bijv. 217.6°) of lege
+IMU-reads. **Altijd `pkill -f app_muto.py` vooraf**, net als bij Nav2 en
+`robot_bridge.py`.
+
+### Testscript
+
+`/root/phoenix_yaw_drift_test.py` (in `humble_run` container) —
+herbruikbaar voor andere gaits/afstanden via `--direction`, `--cycles`,
+`--reps`. Bevat retry-mechanisme op IMU-read (3 pogingen, oplopende
+delay, zelfde patroon als `foot_contact.py`) en de vloeiende
+stop-sequentie hierboven.
