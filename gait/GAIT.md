@@ -124,6 +124,10 @@ yaw_deg = yaw_raw / 100.0
 | Bestand | Locatie | Beschrijving |
 |---|---|---|
 | `phoenix_gait.py` | `/root/phoenix_gait.py` (container) | Tripod + Ripple + Wave + Centipede gait (centipede-offsets ongevalideerd sinds 10 aug reconstructie) |
+| `phoenix_driver.py` | `/root/phoenix_driver.py` (container), bron `/home/pi/` | Nav2-bewegingsbackend op basis van PhoenixGait, nog niet in de Nav2-launch-keten gehaakt |
+| `phoenix_yaw_drift_test.py` | `/root/phoenix_yaw_drift_test.py` (container) | Yaw-drift-test via directe phoenix_gait-aanroepen |
+| `rotation_calib_test.py` | `/root/rotation_calib_test.py` (container), bron `/home/pi/` | Rotatie-kalibratietest via `cmd_vel`/`/imu` (gebruikt voor `MAX_ANGULAR_SPEED_RADPS`) |
+| `forward_drift_via_node_test.py` | `/root/forward_drift_via_node_test.py` (container), bron `/home/pi/` | Yaw-drift-test via `phoenix_driver.py`/`cmd_vel` i.p.v. directe aanroepen |
 | `centipede_gait.py` | `/root/centipede_gait.py` | Standalone centipede |
 | `foot_contact.py` | `/home/pi/foot_contact.py` | Voetcontact detectie |
 | `muto_controller.py` | `/home/pi/muto_controller.py` | Joystick controller |
@@ -318,5 +322,110 @@ IMU-reads. **Altijd `pkill -f app_muto.py` vooraf**, net als bij Nav2 en
 herbruikbaar voor andere gaits/afstanden via `--direction`, `--cycles`,
 `--reps`. Bevat retry-mechanisme op IMU-read (3 pogingen, oplopende
 delay, zelfde patroon als `foot_contact.py`) en de vloeiende
-TESTMARKER123
 stop-sequentie hierboven.
+
+---
+
+## Nav2-integratie: `phoenix_driver.py` (10 augustus 2026, vervolgsessie)
+
+Doel: `phoenix_gait.py`'s tripod-gait als bewegingsbackend voor Nav2 gebruiken
+i.p.v. de STM32-firmware-gait (0x12-0x17) die `muto_driver_fixed.py` aanstuurt.
+`muto_driver_fixed.py` en de STM32-gait-code blijven intact als terugvaloptie
+— dit is een apart, zelfstandig te starten/stoppen bestand.
+
+### Ontwerp
+
+- Nieuw bestand: `phoenix_driver.py` (host: `/home/pi/`, container: `/root/`)
+- Abonneert op `cmd_vel` — **niet** `cmd_vel_nav` zoals aanvankelijk gedacht.
+  `muto_driver_fixed.py` luistert zelf ook naar `cmd_vel`; Nav2 publiceert naar
+  `cmd_vel_nav` en een bestaande relay (`ros2 run topic_tools relay
+  /cmd_vel_nav /cmd_vel`) zet dat om. `phoenix_driver.py` volgt hetzelfde
+  patroon, dus geen wijziging nodig in de rest van de Nav2-stack.
+- Uitsluitend tripod-gait (`GAITS['tripod']`), met sway+dip aan — de enige
+  eerder gevalideerde configuratie.
+- `linear.x` → `travel_x`, `angular.z` → `rotate`, continu bijgewerkt in de
+  fase-loop (geen losse start/stop-commando's).
+- Timeout op **5,0s** (bewuste keuze: matcht de huidige live waarde in
+  `muto_driver_fixed.py`, niet de aanvankelijk voorgestelde 0,5s).
+- Vloeiende stop-sequentie (decel + sinusoidale interpolatie naar
+  `NEUTRAL_POS`, zelfde patroon als `stable_stop()` in
+  `phoenix_yaw_drift_test.py`) wordt aangeroepen bij **zowel** een expliciete
+  cmd_vel=0 **als** een timeout — bij alleen timeout blijft de robot anders
+  "marcheren op de plek" na een normale Nav2-stop (lift/sway-animatie stopt
+  niet vanzelf enkel omdat travel_x/rotate naar 0 gaan).
+- Geen eigen IMU-publicatie nodig: de EKF gebruikt `imu0: /imu` (extern,
+  ICM20948 via `imu_publisher.py`, losstaand proces) — niet `/imu_stm32` van
+  `muto_driver_fixed.py`. `phoenix_driver.py` hoeft dus geen IMU-code te
+  bevatten; `imu_publisher.py` blijft gewoon naast draaien.
+- `_stop_app_muto()` in het bestand is **niet effectief** wanneer het in de
+  container draait: de container deelt geen PID-namespace met de host, dus
+  `pgrep`/`pkill` binnen de container ziet het host-proces `app_muto.py` niet
+  (bevestigd getest, `PidMode` staat niet op `host`). `/dev/myserial` zelf is
+  wél gedeeld (bind-mount), dus het conflict zou zich alsnog voordoen zonder
+  dat de ingebouwde beveiliging het merkt. **Voor nu:** `app_muto.py` moet
+  vanaf de host gestopt worden vóór `phoenix_driver.py` in de container start
+  — dezelfde volgorde als alle bestaande opstartscripts al gebruiken. Zodra
+  dit in een host-side opstartscript gehaakt wordt (Nav2-launch-integratie,
+  nog te doen), hoort die stap daar te staan, niet in het container-side
+  Python-bestand.
+
+### Kalibratie: `MAX_ANGULAR_SPEED_RADPS` fout geraden, gecorrigeerd
+
+Eerste versie gokte `0.5 rad/s` (geen meting beschikbaar). Live rotatietest
+met `angular.z=0.15` (genormaliseerd `rotate=0.3`) gaf een resultaat dat een
+gebruiker visueel inschatte als "geen rotatie" — vervolgtest op `angular.z=0.45`
+(rotate=0.9) werd visueel geschat op "~40 graden". Precieze IMU-meting
+(`/imu`, extern) via een los kalibratiescript gaf een heel ander beeld:
+
+| test | commando | gemeten rotatie |
+|---|---|---|
+| 1 | angular.z=0.45, 2.0s | +5.14° |
+| 2 (herhaling) | angular.z=0.45, 2.0s | +4.66° |
+| 3 | angular.z=1.0, 5.0s | +15.24° |
+
+Consistent, reproduceerbaar (tests 1-2), en veel lager dan de visuele "~40°"-
+inschatting van test 2 — **de visuele schatting was fors overschat**, niet de
+meting fout (mechanisme gaf hetzelfde resultaat bij herhaling). Werkelijke
+volle-snelheid draaisnelheid: ~3.0-3.3°/s ≈ **0.055 rad/s**, ongeveer 9× lager
+dan de oorspronkelijke gok. `MAX_ANGULAR_SPEED_RADPS` bijgewerkt naar `0.055`.
+**Les:** bij een zwaaiende hexapod-gait is een visuele hoek-inschatting
+onbetrouwbaar — vertrouw de IMU, ook als het resultaat verrassend klein is.
+
+### Test resultaten (standalone, buiten Nav2, via `ros2 topic pub`/testscripts)
+
+| Test | Resultaat |
+|---|---|
+| Start/stop naar neutraal | ✅ vloeiend, bevestigd door gebruiker |
+| Voorwaartse beweging | ✅ vloeiend, juiste richting |
+| Expliciete stop (cmd_vel=0) | ✅ vloeiend, 2× herhaald, geen timeout nodig |
+| Timeout-stop (5.0s) | ✅ vloeiend, correct getriggerd |
+| Rotatie | ✅ mechaniek werkt correct (na kalibratiefix) |
+
+**Yaw-drift via de node (`cmd_vel`/ROS2), 5.3 cycli ≈ 50cm, vergeleken met de
+directe-aanroep-baseline (zie sectie hierboven):**
+
+| Richting | Via node (n) | Gemiddelde | Baseline (direct, n=3) |
+|---|---|---|---|
+| Vooruit | +1.02°, +1.27°, +1.62° (n=3) | **+1.30°** | +2.80° |
+| Achteruit | -2.33°, -1.47° (n=2) | **-1.90°** | -1.36° |
+
+Zelfde asymmetrie-patroon (vooruit positief, achteruit negatief) als de
+baseline, vergelijkbare orde van grootte. **Conclusie:** geen aanwijzing dat
+de ROS2/cmd_vel-integratielaag zelf een nieuwe driftbron toevoegt — de
+afwijkingen die er zijn komen overeen met de al bekende gait-karakteristiek.
+n=2/3 blijft een eerste indicatie, zelfde voorzichtigheid als bij de
+oorspronkelijke meting aanhouden.
+
+### Nog openstaand
+
+1. Meer herhalingen voor statistische zekerheid (met name achteruit, nu n=2)
+2. Nav2-launch-keten aanpassen: `phoenix_driver.py` i.p.v.
+   `muto_driver_fixed.py` starten in `muto_fase1_start.sh` (of vergelijkbaar),
+   inclusief het `app_muto.py`-stopprobleem hierboven correct oplossen op
+   host-niveau
+3. Lifecycle-status-check van alle Nav2-nodes (amcl, controller_server,
+   planner_server, bt_navigator, map_server) vóór een eerste begeleide
+   Nav2-navigatietest — `ros2 node list` bewijst niet dat een node actief is,
+   gebruik `ros2 lifecycle get`
+4. Een korte, begeleide Nav2-navigatietest op bekende, obstakelvrije
+   ondergrond

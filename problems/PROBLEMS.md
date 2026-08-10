@@ -249,6 +249,11 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
 - **Check:** `ss -tlnp | grep 8080`
 - **Fix:** `sudo pkill -f "http.server"` en opnieuw starten
 
+### Een `pkill -f app_muto.py` binnen een container-side Python-script werkt niet
+- **Oorzaak:** `humble_run` deelt geen PID-namespace met de host (`docker inspect --format '{{.HostConfig.PidMode}}'` geeft leeg, niet `host`). `pgrep`/`pkill` binnen de container ziet host-processen zoals `app_muto.py` domweg niet, ook al is `/dev/myserial` zelf wél gedeeld (bind-mount) en zou het conflict zich dus alsnog voordoen.
+- **Symptoom:** een `_stop_app_muto()`-achtige beveiliging in een script dat via `docker exec` in `humble_run` draait, lijkt te werken (geen foutmelding) maar stopt in werkelijkheid niets.
+- **Fix:** `app_muto.py` moet altijd vanaf de **host** gestopt worden, vóór een `docker exec`/`docker cp`+start van iets dat de seriële poort nodig heeft — exact het patroon dat alle bestaande host-side opstartscripts (`muto_fase1_start.sh`, `switch_to_own_stack.sh`, etc.) al gebruiken. Ontdekt tijdens het bouwen van `phoenix_driver.py` (10 aug 2026, zie GAIT.md).
+
 ---
 
 ## 🔭 LiDAR (YDLidar TG30)

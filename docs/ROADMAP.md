@@ -87,6 +87,7 @@ Geen `robot_state_publisher`, geen AMCL, geen Nav2. Dus: **als je vandaag via Di
 | 4 | Resterende Nav2-betrouwbaarheidspunten afronden: forward-drift-validatie op gunstige afstand, IMU-fusie, rotatie-asymmetrie | Beïnvloedt hoe betrouwbaar autonome navigatie sowieso is, los van de Dify-koppeling | Doorlopend, deels al bezig |
 | 5 | **Besluit over Jetson:** (a) lichtere/lokale RTAB-Map-variant zonder Jetson-split vinden, (b) alsnog de oorspronkelijke YOLO/vision-rol implementeren om de Pi te ontlasten, of (c) bewust afschrijven en architectuur vereenvoudigen tot Pi+PC | Jetson kost stroom/ruimte zonder nu iets bij te dragen | Strategische keuze, geen technisch obstakel |
 | 6 | `have_a_look()`-visie-workflow afronden | Al genoteerd als open punt sinds de juni-inventarisatie, nooit voltooid | Klein-middel |
+| 7 | **Nieuw (10 aug 2026): `phoenix_driver.py` afmaken** — `phoenix_gait.py`'s tripod-gait als Nav2-bewegingsbackend i.p.v. de STM32-firmware-gait. Standalone gebouwd en getest (start/stop/rotatie/drift allemaal bevestigd op hardware, zie GAIT.md); nog niet in de Nav2-launch-keten gehaakt. Losstaand van stap 1-3 hierboven — betreft de kwaliteit van de beweging zelf, niet de Dify-koppeling. | Yaw-drift bij phoenix_gait tripod (+1,3°/-1,9° over 50cm, via de node gemeten) is een stuk kleiner dan de STM32-firmware-gait (-8° tot -16°) — relevant voor Nav2's dead-reckoning tussen LiDAR-scans | Middel — Nav2-launch-integratie + lifecycle-checks + begeleide test nog te doen |
 
 ---
 
