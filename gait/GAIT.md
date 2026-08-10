@@ -181,3 +181,78 @@ CONTACT_THRESHOLD = 12  # graden
 
 ### Servo executietijd truc (zelf ontdekt)
 Yahboom bereikt hun vloeiende gait kwaliteit via servo hardware interpolatie (register 0x2C/0x2D, ~18ms executietijd). Dit combineert met software sinusoïdale easing voor optimale bewegingskwaliteit — als vervanging voor de ontbrekende firmware features.
+
+
+---
+
+## Sessie 10 augustus 2026 — Regressie gevonden en gefixt
+
+### Regressie t.o.v. eerder werkende versie
+
+Het bestand `/home/pi/phoenix_gait.py` (d.d. 8 juli, 7917 bytes) bleek een
+terugval te zijn t.o.v. de eerder werkende versie eind juni. Ontbrekend:
+continu fasemodel, sinusoidale easing op horizontale beweging,
+centipede-gait, body dip / snelheidsafhankelijke lift / accel-decel,
+servo hardware-interpolatie. Reconstructie uitgevoerd op basis van
+projectgeschiedenis; centipede leg-offsets gebruiken de eerder
+gedocumenteerde `[4/6, 2/6, 0/6, 1/6, 5/6, 3/6]` reeks (nog te bevestigen
+op hardware in deze reconstructie).
+
+### Rootcause: `_foot_delta` gebruikte mount-hoek i.p.v. wereldrichting
+
+**Symptoom:** robot bleef op de plaats staan tijdens tripod-gait — poten
+bewogen zichtbaar (lift, heen-en-weer) maar het lichaam verplaatste niet.
+
+**Oorzaak:** de translatierichting (`tx`, `tz`) werd per poot geroteerd
+met de mount-hoek van die poot (`MOUNT_RAD[leg]`):
+
+```python
+# FOUT — elke poot duwt radiaal t.o.v. eigen mount-hoek i.p.v. één
+# gezamenlijke wereldrichting. Netto lichaamsverplaatsing ~0.
+def _foot_delta(self, leg, gait, tx, tz, rot):
+    angle = MOUNT_RAD[leg]
+    dx = gait.step_length * tx * math.cos(angle)
+    dy = gait.step_length * tx * math.sin(angle)
+    dx += gait.step_length * tz *  math.sin(angle)
+    dy += gait.step_length * tz * -math.cos(angle)
+    ...
+```
+
+De rotatie-component (`rx, ry`) was wel correct — die gebruikt bewust
+`nx, ny` (pootpositie) voor tangentiële beweging bij het draaien.
+
+**Fix:** translatie loskoppelen van mount-hoek, vaste wereldrichting
+voor alle poten (coordinatensysteem: +x=rechts, +y=voorwaarts):
+
+```python
+def _foot_delta(self, leg, gait, tx, tz, rot):
+    nx, ny, _ = NEUTRAL_POS[leg]
+    dx = gait.step_length * tz
+    dy = gait.step_length * tx
+    rot_scale = gait.step_length * 0.6
+    rx = -ny * rot * rot_scale / max(math.hypot(nx, ny), 1)
+    ry =  nx * rot * rot_scale / max(math.hypot(nx, ny), 1)
+    return (dx + rx, dy + ry)
+```
+
+**Resultaat:** bevestigd op hardware — vloeiende voorwaartse beweging
+met tripod-gait + sway. Backup van pre-fix bestand: `phoenix_gait.py.bak`
+op de Pi.
+
+### Testresultaten deze sessie
+
+| Gait | Status | Opmerking |
+|---|---|---|
+| neutral | werkt | geen bewegingsindicatie mogelijk (kan vals-positief zijn als robot al neutraal staat) |
+| one_leg | werkt | been 0 (RF) soepele op/neer beweging |
+| tripod + sway | **werkt, bevestigd vloeiende voorwaartse loop** | na `_foot_delta`-fix |
+| ripple | nog niet getest | |
+| wave | nog niet getest | |
+| centipede | nog niet getest | leg-offsets ongevalideerd sinds reconstructie |
+| `--dip` (body dip) | nog niet expliciet getest | |
+
+### Bekend openstaand gat in reconstructie
+
+`eff_lift_scale` (snelheidsafhankelijke lift) wordt in `foot_targets()`
+berekend maar nergens toegepast op `gait.lift_height` — dit is een
+onafgemaakt onderdeel van de reconstructie, geen nieuwe regressie.
