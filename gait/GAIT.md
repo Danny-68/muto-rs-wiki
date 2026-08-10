@@ -318,4 +318,5 @@ IMU-reads. **Altijd `pkill -f app_muto.py` vooraf**, net als bij Nav2 en
 herbruikbaar voor andere gaits/afstanden via `--direction`, `--cycles`,
 `--reps`. Bevat retry-mechanisme op IMU-read (3 pogingen, oplopende
 delay, zelfde patroon als `foot_contact.py`) en de vloeiende
+TESTMARKER123
 stop-sequentie hierboven.
