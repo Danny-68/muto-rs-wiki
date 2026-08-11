@@ -42,11 +42,40 @@ import time
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Imu
 
 sys.path.insert(0, '/root')
 from phoenix_gait import PhoenixGait, HardwareInterface, GAITS, NEUTRAL_POS, ease
 
 SERIAL_PORT = '/dev/myserial'
+
+# STM32-onboard-yaw (zelfde protocol als robot_bridge.py, "stabiel binnen
+# ~0.1 graden in rust", bewezen betrouwbaar voor rotatie -- i.t.t. rf2o, dat
+# op 11 aug 2026 een consistente ~2.4-2.8x overschatting bleek te geven
+# tijdens draaien, zie PROBLEMS.md). Gebruikt dezelfde /dev/myserial-
+# verbinding als de servo's (phoenix_driver.py's HardwareInterface), dus
+# hier ingebouwd i.p.v. als apart proces -- nooit twee gelijktijdige
+# verbindingen naar dezelfde seriele poort.
+STM32_IMU_CMD = bytes([0x55, 0x00, 0x09, 0x02, 0x60, 0x07, 0x8D, 0x00, 0xAA])
+# LET OP (11 aug 2026): op 10Hz interfereerde dit merkbaar met de
+# servo-aansturing op dezelfde seriele poort -- gebruiker zag nog maar
+# "heel weinig" beweging. Verlaagd naar 2Hz; nog te bevestigen of dit
+# voldoende EKF-yaw-updates geeft zonder de beweging te hinderen.
+STM32_IMU_HZ = 2
+
+
+def _read_stm32_yaw_deg(ser):
+    ser.reset_input_buffer()
+    ser.write(STM32_IMU_CMD)
+    time.sleep(0.02)
+    raw = ser.read(64)
+    for i in range(len(raw) - 11):
+        if raw[i] == 0x55 and raw[i + 1] == 0x00 and raw[i + 3] == 0x12 and raw[i + 4] == 0x60:
+            def signed16(hi, lo):
+                val = (hi << 8) | lo
+                return (val - 0x10000) / 100.0 if val >= 0x8000 else val / 100.0
+            return signed16(raw[i + 9], raw[i + 10])
+    return None
 HZ = 50
 DT = 1.0 / HZ
 
@@ -102,6 +131,9 @@ class PhoenixDriver(Node):
         self.sub = self.create_subscription(Twist, 'cmd_vel', self.cb, 10)
         self.create_timer(0.3, self.timeout_check)
         self.create_timer(DT, self._step)
+
+        self.imu_pub = self.create_publisher(Imu, 'imu_stm32', 10)
+        self.create_timer(1.0 / STM32_IMU_HZ, self._publish_stm32_yaw)
         self.get_logger().info(
             'Phoenix driver gestart (tripod-only, PhoenixGait i.p.v. STM32-firmware-gait)')
 
@@ -138,12 +170,34 @@ class PhoenixDriver(Node):
             return
         with self._lock:
             travel_x, rotate, target_speed = self.travel_x, self.rotate, self.target_speed
+        # TEST 11 aug 2026 (sway uit tijdens pure rotatie) WEERLEGD -- ratio
+        # bleef ~2.4x, vrijwel gelijk aan met sway aan. Teruggezet naar altijd
+        # aan. Zie PROBLEMS.md voor de volledige rf2o-overschatting-bevinding.
         positions, _ = self.engine.foot_targets(
             self.global_phase, self.gait,
             travel_x=travel_x, travel_z=0.0, rotate=rotate,
             target_speed=target_speed, body_sway=True, body_dip=True)
         self.iface.send(positions)
         self.global_phase = (self.global_phase + DT / self.gait.cycle_time_s) % 1.0
+
+    def _publish_stm32_yaw(self):
+        yaw_deg = _read_stm32_yaw_deg(self.iface._ser)
+        if yaw_deg is None:
+            return
+        yaw_rad = math.radians(yaw_deg)
+        msg = Imu()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'imu_link'
+        msg.orientation.z = math.sin(yaw_rad / 2.0)
+        msg.orientation.w = math.cos(yaw_rad / 2.0)
+        # Alleen yaw vertrouwd (roll/pitch niet uitgelezen door dit commando);
+        # covariantie klein voor yaw, groot voor de rest zodat EKF alleen yaw fuseert.
+        msg.orientation_covariance[0] = 99999.0
+        msg.orientation_covariance[4] = 99999.0
+        msg.orientation_covariance[8] = 0.02
+        msg.angular_velocity_covariance[0] = -1.0
+        msg.linear_acceleration_covariance[0] = -1.0
+        self.imu_pub.publish(msg)
 
     def _do_stable_stop(self):
         """Vloeiende stop: decel binnen de gait (target_speed -> 0) gevolgd

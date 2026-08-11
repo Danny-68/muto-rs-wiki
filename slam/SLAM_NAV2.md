@@ -281,3 +281,35 @@ docker exec humble_run pkill -9 -f static_tf_pub_laser
 **DDS Discovery:**
 - `ROS_DOMAIN_ID=0` op beide boards
 - CycloneDDS unicast XML configs vereist (WiFi multicast onbetrouwbaar)
+
+---
+
+## rf2o Rotatie-Overschatting — Broncode-onderzoek (11 aug 2026)
+
+Achtergrond en volledige testreeks: zie [PROBLEMS.md](../problems/PROBLEMS.md#rf2o-overschat-rotatie-24-34-tijdens-phoenix_gait-tripod-beweging-11-aug-2026-root-cause-onderzoek).
+Dit stuk documenteert specifiek wat er in de rf2o-broncode zelf gecontroleerd is, voor toekomstige referentie.
+
+**Locatie in container:** `/root/yahboomcar_ws/src/rf2o_laser_odometry/src/CLaserOdometry2DNode.cpp` en `CLaserOdometry2D.cpp`.
+
+**1. Laser→base_link-transformatie (offset-hypothese):**
+```cpp
+// CLaserOdometry2DNode.cpp — leest TF eenmalig bij eerste scan
+tf_laser = buffer_->lookupTransform(base_frame_id, last_scan.header.frame_id, ...);
+rf2o_ref.setLaserPose(laser_tf);   // hier komt onze gemeten [-0.032, 0, 0.184] binnen
+
+// CLaserOdometry2D.cpp — per scan:
+laser_pose_ = laser_pose_ * pose_aux_2D;               // increment in laser-eigen frame
+robot_pose_ = laser_pose_ * laser_pose_on_robot_inv_;  // terugvertaald naar base_link
+```
+Dit is standaard, correcte SE(2)-rigid-transform-chaining. Een rotatiehoek van een star lichaam is onafhankelijk van het gekozen draaipunt — als base_link écht θ roteert, roteert de (star bevestigde) laser óók precies θ, met alleen een extra boogje in x/y dat apart en correct wordt meegenomen. **Geen bug hier**, ondanks dat dit exact de plek was waar de gemeten lidar-offset relevant zou kunnen zijn.
+
+**2. QoS van rf2o's eigen `/scan`-subscriptie:**
+```cpp
+laser_sub = create_subscription<LaserScan>(laser_scan_topic,
+    rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile(), ...);
+```
+Expliciet BEST_EFFORT. Live gecontroleerd via `ros2 topic info /scan --verbose`: de ydlidar-driver publiceert RELIABLE. RELIABLE-publisher → BEST_EFFORT-subscriber is een **compatibele** combinatie (dit is niet dezelfde bug-klasse als de eerder gevonden `/scan_fixed`-QoS-mismatch, waar een default-RELIABLE-subscriber niets ontving van een BEST_EFFORT-publisher — daar is de richting omgekeerd en wél incompatibel).
+
+**3. Werkelijke aard van het algoritme:** rf2o is geen scan-to-scan ICP, maar implementeert de "Range Flow"-methode (Jaimez & Gonzalez-Jimenez, ICRA 2016, zie header-comment in `CLaserOdometry2D.cpp`) — een gelineariseerde, dense optical-flow-achtige schatter die een gladde, kleine inter-scan-verplaatsing veronderstelt. Onafhankelijk literatuuronderzoek (Leg-KILO, "Vibration-aware LiDAR-Inertial Odometry", zie PROBLEMS.md voor bronnen) bevestigt dat dit type linearisering een erkende, algemene mismatch heeft met schoksgewijze legged-gait-beweging — geen incidentele bug, maar een fundamentele eigenschap van de methode. Alle onderzochte state-of-the-art legged-robot-implementaties (Cerberus, VILENS, OCELOT, DogLegs) gebruiken daarom IMU/poot-kinematiek als primaire rotatiebron en lidar/visueel alleen voor positie-drift-correctie — nooit als primaire rotatiebron tijdens lopen.
+
+**Praktische conclusie:** geen fix nodig/mogelijk in rf2o zelf voor dit gebruik. De juiste vervolgstap is een architectuurkeuze (welke sensor voedt de EKF's yaw-kanaal), niet verder zoeken naar een codefout. Zie ROADMAP.md "Testdoelen volgende sessie" voor de concrete vervolgstappen.
