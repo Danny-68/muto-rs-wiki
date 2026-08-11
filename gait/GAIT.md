@@ -416,16 +416,113 @@ afwijkingen die er zijn komen overeen met de al bekende gait-karakteristiek.
 n=2/3 blijft een eerste indicatie, zelfde voorzichtigheid als bij de
 oorspronkelijke meting aanhouden.
 
-### Nog openstaand
+### Nog openstaand (bijgewerkt 11 augustus 2026 — punten 2-4 hieronder afgerond, zie volgende sectie)
 
 1. Meer herhalingen voor statistische zekerheid (met name achteruit, nu n=2)
-2. Nav2-launch-keten aanpassen: `phoenix_driver.py` i.p.v.
-   `muto_driver_fixed.py` starten in `muto_fase1_start.sh` (of vergelijkbaar),
-   inclusief het `app_muto.py`-stopprobleem hierboven correct oplossen op
-   host-niveau
-3. Lifecycle-status-check van alle Nav2-nodes (amcl, controller_server,
-   planner_server, bt_navigator, map_server) vóór een eerste begeleide
-   Nav2-navigatietest — `ros2 node list` bewijst niet dat een node actief is,
-   gebruik `ros2 lifecycle get`
-4. Een korte, begeleide Nav2-navigatietest op bekende, obstakelvrije
-   ondergrond
+
+---
+
+## Nav2-live-integratietest (11 augustus 2026)
+
+### `muto_fase1_start.sh` uitgebreid met driver-keuze
+
+`STAP 8` accepteert nu `DRIVER=phoenix_driver bash muto_fase1_start.sh` om
+`phoenix_driver.py` te gebruiken i.p.v. het default `muto_driver_fixed.py`
+(zonder argument verandert er niets aan het bestaande gedrag). Zie
+`software/pi/scripts/muto_fase1_start.sh`.
+
+### ⚠️ Bug gevonden en gefixt: stop-sequentie triggerde op elke kleine dip
+
+**Symptoom (live geobserveerd tijdens de eerste `NavigateToPose`-poging):**
+schokkerige beweging ("alsof er een sprongetje of twee gaits gelijktijdig
+bewogen"), en het duurde meerdere loops voordat de robot echt stilstond.
+`phoenix_driver.log` toonde een volledige (2s, blokkerende) vloeiende
+stop-sequentie **elke 2,5-3 seconden** gedurende de hele navigatiepoging.
+
+**Oorzaak:** de eerste versie van `_do_stable_stop()` werd aangeroepen zodra
+`cmd_vel` ook maar even onder de deadband kwam (`was_moving and not
+want_moving` direct in `cb()`). Nav2's `RegulatedPurePursuitController`
+publiceert regelmatig kortstondig lage/fluctuerende snelheidscommando's als
+normale bijsturing — elke zo'n dip triggerde de volledige, blokkerende
+stop+neutraal-sequentie, waardoor de robot constant onderbroken werd vlak
+nadat hij begon te bewegen. In de standalone tests (sectie hierboven) kwam
+dit niet aan het licht, omdat die altijd óf een aanhoudend commando óf één
+duidelijke stop stuurden — nooit de snel-fluctuerende commando's van een
+echte Nav2-controller-loop.
+
+**Fix:** een debounce (`STOP_DEBOUNCE_S = 0.5`) toegevoegd. Bij een dip onder
+de deadband wordt niet meteen gestopt, maar het tijdstip onthouden
+(`zero_since`); pas als dat langer dan 0,5s aanhoudt (gecheckt via dezelfde
+periodieke `timeout_check()`-timer), volgt de vloeiende stop-sequentie. Een
+kortstondige dip die binnen 0,5s weer een nieuw beweeg-commando krijgt,
+wordt genegeerd — `travel_x`/`rotate` worden gewoon bijgewerkt en de
+bestaande fase-loop loopt door.
+
+### Eerste succesvolle live `NavigateToPose`-test
+
+Na de fix: doel van 1,3m recht vooruit gestuurd via `ros2 action send_goal`.
+**Resultaat: SUCCEEDED**, robot bewoog ~0,91m (binnen Nav2's
+`xy_goal_tolerance`), met slechts **één** stop-sequentie aan het eind — geen
+tussentijdse onderbrekingen meer. Gebruiker bevestigde: "de beweging zag er
+erg fraai uit."
+
+**Kanttekening:** het navigatiedoel zelf klopte niet met de bedoeling
+(deuropening lag rechts van de robot, doel ging recht vooruit) — dit wijst
+op een AMCL-lokalisatienauwkeurigheidsprobleem, **los van** `phoenix_driver.py`
+zelf (de bewegingskwaliteit was goed; het probleem zat in de pose-schatting
+waarop het doel gebaseerd was). Zie PROBLEMS.md voor de AMCL-lokalisatie-
+bevindingen van deze sessie.
+
+### Zijdelingse vondst: `ros2 topic echo` is onbetrouwbaar voor grote arrays
+
+Tijdens het diagnosticeren van een vermeend lidar-hardwareprobleem (zie
+PROBLEMS.md) bleek dat het tellen van array-elementen door de tekst-output
+van `ros2 topic echo` te parsen **fundamenteel onbetrouwbaar** is voor grote
+arrays (2020 elementen) — de CLI knipt de weergave af, en een regex-telling
+daarop gaf stelselmatig "128 punten" i.p.v. de werkelijke 2020. Een lidar-
+stekker is losgemaakt en de lidar is zelfs opengemaakt om een probleem te
+zoeken dat er niet was. **Les, breed toepasbaar:** voor het tellen/valideren
+van array-lengtes in een ROS2-boodschap altijd een directe rclpy-subscriber
+gebruiken (`len(msg.ranges)`), nooit tekst-output van `ros2 topic echo`
+parsen. Zie `software/pi/tools/check_scan_count.py` voor het correcte
+patroon.
+
+### AMCL-lokalisatie: verificatietools gebouwd, nauwkeurigheid nog niet opgelost
+
+- `mark_amcl_pose.py`: genereert een ingezoomde kaartafbeelding met AMCL's
+  geschatte positie+oriëntatie gemarkeerd (rode stip + pijl), voor een
+  gebruiker om visueel te vergelijken met de werkelijke situatie.
+- `verify_amcl_pose.py`: objectieve check — vergelijkt live laser-metingen
+  op 0/90/180/270 graden (robot-relatief) met een 2D-raycast tegen de kaart
+  vanaf de huidige AMCL-pose. **Belangrijke fix onderweg:** de eerste versie
+  parsete ook `ros2 topic echo`-tekst (zelfde valkuil als hierboven) én
+  gebruikte de verkeerde QoS (default RELIABLE, terwijl `/scan_fixed`
+  BEST_EFFORT publiceert) — beide gefixt door een directe rclpy-subscriber
+  met expliciete `QoSProfile(reliability=BEST_EFFORT)` te gebruiken.
+- `muto_viz.html` aangepast: scan-overlay tekent nu op `/amcl_pose`
+  (PoseWithCovarianceStamped) i.p.v. ruwe `/odom` — laat direct zien of de
+  laserscan-vorm overeenkomt met de kaart-contouren op de geschatte positie.
+- **Terugkerende observatie:** hoek 90° (robot-relatief) geeft herhaaldelijk
+  een "0,00"-uitlezing (ongeldige/geen-return) over meerdere, verder
+  uiteenlopende AMCL-poses heen — vermoedelijk een vaste, fysieke blinde hoek
+  op de robot zelf (bijv. een montagepunt vlak voor de sensor in die
+  richting), geen pose-fout. Nog niet apart bevestigd.
+- **Rotatie-bursts (`/reinitialize_global_localization` + herhaalde
+  `angular.z`-commando's) convergeren niet betrouwbaar** — covariantie daalt
+  wel, maar de raycast-verificatie blijft na 3-6 bursts vaak op 1-2 van de 4
+  richtingen fors afwijken, soms zelfs verslechterend bij meer bursts i.p.v.
+  verbeterend. Handmatige correctie via de gemarkeerde kaartafbeelding +
+  `/initialpose` werkte beter (positie-match bevestigd door gebruiker), maar
+  oriëntatie bleek daarna alsnog onvoldoende nauwkeurig voor een echt
+  betekenisvol navigatiedoel.
+
+### Nog openstaand
+
+1. Meer herhalingen voor statistische zekerheid van de yaw-drift-metingen
+   hierboven (met name achteruit, nu n=2)
+2. AMCL-lokalisatienauwkeurigheid verder verbeteren — rotatie-bursts alleen
+   zijn onvoldoende betrouwbaar gebleken; overweeg de combinatie uit eerdere
+   sessies (burst + kaartafbeelding + raycast-verificatie) systematischer of
+   overweeg kleine translatiebewegingen toe te voegen aan de burst-procedure
+3. De 90°-blinde-hoek-bevinding bevestigen/verklaren (fysieke obstructie?)
+4. Meer navigatietests zodra de lokalisatie betrouwbaarder is

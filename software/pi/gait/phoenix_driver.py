@@ -58,6 +58,12 @@ CMD_TIMEOUT_S = 5.0  # zelfde als de huidige live waarde in muto_driver_fixed.py
 CMD_DEADBAND = 0.02  # onder deze genormaliseerde waarde tellen we als "stil"
 DECEL_DURATION_S = 1.0
 NEUTRAL_DURATION_S = 1.0
+# Live Nav2-test (10 aug 2026) toonde dat de controller vaak kort onder de
+# deadband duikt tijdens normale bijsturing (~elke 2.5-3s een dip) -- zonder
+# debounce triggerde dat elke keer de volledige (2s, blokkerende) stop-
+# sequentie, waardoor de robot nooit vooruitkwam. Pas als "stil" langer dan
+# deze tijd aanhoudt, behandelen we het als een echte stop.
+STOP_DEBOUNCE_S = 0.5
 
 
 def clamp(v, lo, hi):
@@ -91,6 +97,7 @@ class PhoenixDriver(Node):
         self.state = 'idle'  # 'idle' | 'moving'
         self.global_phase = 0.0
         self.last_cmd = self.get_clock().now()
+        self.zero_since = None
 
         self.sub = self.create_subscription(Twist, 'cmd_vel', self.cb, 10)
         self.create_timer(0.3, self.timeout_check)
@@ -106,16 +113,24 @@ class PhoenixDriver(Node):
             want_moving = abs(travel_x) > CMD_DEADBAND or abs(rotate) > CMD_DEADBAND
             self.travel_x = travel_x
             self.rotate = rotate
-            was_moving = self.state == 'moving'
-            if want_moving and self.state == 'idle':
-                self.state = 'moving'
-                self.target_speed = 1.0
+            if want_moving:
+                self.zero_since = None
+                if self.state == 'idle':
+                    self.state = 'moving'
+                    self.target_speed = 1.0
+            elif self.state == 'moving' and self.zero_since is None:
+                # Zie STOP_DEBOUNCE_S -- niet meteen stoppen, eerst afwachten
+                # of dit een kortstondige dip is (normaal Nav2-controllergedrag)
+                # of een echte stop.
+                self.zero_since = self.get_clock().now()
 
-        # Overgang naar stilstand (Nav2 stuurt expliciet cmd_vel=0, geen
-        # timeout) -- zelfde vloeiende stop-sequentie als bij timeout, anders
-        # blijft de robot "marcheren op de plek" (lift/sway stopt niet vanzelf
-        # alleen omdat travel_x/rotate naar 0 gaan, zie module-docstring-les).
-        if was_moving and not want_moving:
+    def _check_stop_debounce(self):
+        with self._lock:
+            if self.state != 'moving' or self.zero_since is None:
+                return
+            elapsed = (self.get_clock().now() - self.zero_since).nanoseconds / 1e9
+            should_stop = elapsed > STOP_DEBOUNCE_S
+        if should_stop:
             self._do_stable_stop()
 
     def _step(self):
@@ -165,12 +180,15 @@ class PhoenixDriver(Node):
             self.rotate = 0.0
             self.target_speed = 0.0
             self.state = 'idle'
+            self.zero_since = None
 
     def timeout_check(self):
         elapsed = (self.get_clock().now() - self.last_cmd).nanoseconds / 1e9
         if elapsed > CMD_TIMEOUT_S and self.state == 'moving':
             self.get_logger().info(f'Timeout ({CMD_TIMEOUT_S}s zonder nieuw cmd_vel)')
             self._do_stable_stop()
+            return
+        self._check_stop_debounce()
 
     def destroy_node(self):
         if self.state == 'moving':

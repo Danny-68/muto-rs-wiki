@@ -392,4 +392,45 @@ Geordend per categorie. Raadpleeg bij elk probleem eerst dit document.
         - - **Oorzaak:** niet met zekerheid vastgesteld — vermoedelijk verloren tijdens een eerdere consolidatiepoging (tripod + centipede samenvoegen in één bestand).
           - - **Fix:** reconstructie op basis van projectgeschiedenis (10 augustus 2026). **Let op:** centipede leg-offsets (`[4/6, 2/6, 0/6, 1/6, 5/6, 3/6]`) zijn na deze reconstructie nog niet opnieuw op hardware bevestigd.
             - - **Les:** bij twijfel over de actuele staat van een script, eerst het bestand volledig inlezen en vergelijken met eerdere sessies voordat je een losse bug fixt — een geïsoleerde patch op een geregresseerd bestand lost het symptoom niet op.
+
+---
+
+## 🧭 Nav2 / phoenix_driver.py-integratie (11 augustus 2026)
+
+### Schokkerige beweging + trage stop tijdens NavigateToPose
+- **Symptoom:** robot bewoog met zichtbare "sprongetjes" (alsof twee gaits gelijktijdig actief waren), en het duurde meerdere loops voordat hij echt stilstond.
+- **Oorzaak:** `phoenix_driver.py`'s vloeiende stop-sequentie (decel + neutraal-interpolatie, ~2s, blokkerend) werd aangeroepen zodra `cmd_vel` ook maar even onder de deadband kwam. Nav2's `RegulatedPurePursuitController` publiceert regelmatig kortstondig lage/fluctuerende snelheidscommando's als normale bijsturing (elke ~2,5-3s) — elke dip triggerde de volledige stopsequentie, wat de fase-loop terugzette en bij hervatten een zichtbare discontinuïteit ("sprongetje") gaf.
+- **Fix:** debounce toegevoegd (`STOP_DEBOUNCE_S = 0.5`) — pas stoppen als "stil" langer dan 0,5s aanhoudt, niet bij de eerste dip. Zie GAIT.md, sectie "Nav2-live-integratietest", voor de volledige uitleg en code.
+- **Resultaat na fix:** eerste succesvolle `NavigateToPose`-test (SUCCEEDED), vloeiende beweging, maar één stopsequentie aan het eind i.p.v. herhaaldelijk.
+
+### `pkill`/`pgrep` binnen een container-side script ziet host-processen niet
+- Zie eerdere entry onder 🐳 Docker/Containers — geldt ook voor `phoenix_driver.py`'s ingebouwde `_stop_app_muto()`. Los, host-side stoppen van `app_muto.py` blijft nodig (gebeurt al in `muto_fase1_start.sh`).
+
+---
+
+## 🔍 Diagnose-methodologie: valkuilen ontdekt tijdens AMCL-troubleshooting (11 augustus 2026)
+
+### `ros2 topic echo` is onbetrouwbaar voor het TELLEN van array-elementen
+- **Symptoom:** een vermeend lidar-hardwareprobleem — `/scan` leek maar 128 punten te bevatten i.p.v. de verwachte 2020 (die de driver zelf bij opstarten meldt: "Fixed Size: 2020"). Dit leidde tot uitgebreide fysieke troubleshooting (stekker losgemaakt en teruggezet, lidar zelfs opengemaakt om de rotatie visueel te controleren) — allemaal voor een probleem dat niet bestond.
+- **Oorzaak:** het tellen gebeurde door de tekst-output van `ros2 topic echo --once` met een regex te parsen. Voor grote arrays (2020 elementen) knipt de CLI/onderliggende numpy-representatie de weergave af; de regex ving dan systematisch maar het eerste, afgeknipte deel (128 elementen).
+- **Fix/juiste methode:** een directe rclpy-subscriber gebruiken en `len(msg.ranges)` uitlezen — geen tekst-parsing. Bevestigde het werkelijke, correcte aantal (2020) direct.
+- **Les (breed toepasbaar):** vertrouw nooit een tekst-geparste telling van een groot array-veld uit `ros2 topic echo`. Gebruik altijd een klein rclpy-scriptje met een directe subscriber voor dit soort validaties. Zie `software/pi/tools/check_scan_count.py`.
+
+### `/scan_fixed` gebruikt BEST_EFFORT QoS — een default-RELIABLE subscriber ontvangt niets
+- **Symptoom:** een eigen rclpy-subscriber op `/scan_fixed` (voor de AMCL-raycast-verificatietool) hing/timede uit zonder ooit een bericht te ontvangen, met de waarschuwing "offering incompatible QoS... Last incompatible policy: RELIABILITY".
+- **Oorzaak:** `create_subscription(LaserScan, '/scan_fixed', cb, 10)` gebruikt standaard RELIABLE-reliability, maar `/scan_fixed`'s publisher (via `scan_timestamped.py`) gebruikt BEST_EFFORT.
+- **Fix:** expliciet een `QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=10)` meegeven aan `create_subscription`.
+- **Zelfde categorie als:** de al-bekende `rgbd_sync`-QoS-mismatch hierboven (RELIABLE vs BEST_EFFORT) — dit patroon komt vaker voor in deze stack, altijd checken bij "subscriber ontvangt niets" zonder foutmelding.
+
+### Lidar scan-rate degradeerde naar 2-5Hz (i.p.v. 10Hz) tijdens een lange sessie
+- **Symptoom:** `ros2 topic hz /scan_fixed` gaf 2,4-5,8Hz i.p.v. de geconfigureerde 10Hz, met sporadische "Failed to get scan"-fouten in het lidar-log.
+- **Oorzaak:** vermoedelijk een combinatie van hoge systeembelasting (Pi-load 3,6, o.a. door `rosbridge_server` erbij te starten bovenop een al drukke stack: Nav2 volledig + phoenix_driver + rf2o + EKF + joy + Foxglove) en/of een tijdelijke verbindingshapering.
+- **Fix:** lidar-node herstarten (rate hersteld naar 10Hz). `rosbridge_server` kost merkbaar CPU (zoals al bekend, zie 💻 Pi CPU Overbelasting) — niet permanent laten draaien, alleen tijdelijk aanzetten voor visuele verificatie en daarna weer stoppen.
+- **Nuance:** dit was een **apart, echt** probleem (rate), losstaand van de "128 punten"-non-bug hierboven (telmethode). Beide speelden tegelijk, wat de diagnose extra verwarrend maakte.
+
+### AMCL rotatie-burst-procedure convergeert niet altijd betrouwbaar
+- **Symptoom:** herhaalde `/reinitialize_global_localization` + `angular.z`-bursts lieten de covariantie wel dalen, maar de objectieve raycast-verificatie (laser vs. kaart op 0/90/180/270°) bleef op 1-2 van de 4 richtingen fors afwijken, en verslechterde soms zelfs bij meer bursts.
+- **Werkend alternatief:** handmatige correctie via een gemarkeerde kaartafbeelding (rode stip+pijl) die de gebruiker visueel vergelijkt met de werkelijke positie, gevolgd door een `/initialpose`-publish — gaf een door de gebruiker bevestigde correcte positie. Oriëntatie bleek daarna nog niet per se nauwkeurig genoeg voor een verderop gelegen navigatiedoel (deuropening lag rechts, doel ging recht vooruit).
+- **Nog niet opgelost:** een betrouwbare, herhaalbare procedure voor volledige (positie + oriëntatie) AMCL-convergentie op deze kaart. Zie GAIT.md "Nog openstaand" voor vervolgstappen.
+- **Terugkerende observatie:** hoek 90° (robot-relatief) geeft consistent een ongeldige "0,00"-laseruitlezing over meerdere, uiteenlopende poses — mogelijk een vaste fysieke blinde hoek op de robot, nog niet apart bevestigd.
               - 

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Muto RS RTAB-Map</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0d1117; color:#e6edf3; font-family:monospace; }
+h1 { padding:12px 20px; background:#161b22; border-bottom:1px solid #30363d; font-size:16px; }
+h1 span { color:#58a6ff; }
+#status { padding:6px 20px; font-size:12px; border-bottom:1px solid #30363d; }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+.ok { background:#3fb950; } .err { background:#f85149; } .warn { background:#d29922; }
+#main { display:grid; grid-template-columns:1fr 300px; height:calc(100vh - 68px); }
+canvas { background:#010409; cursor:crosshair; }
+#sidebar { background:#161b22; border-left:1px solid #30363d; padding:12px; overflow-y:auto; }
+.panel { margin-bottom:14px; }
+.panel h3 { font-size:10px; color:#8b949e; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; padding-bottom:4px; border-bottom:1px solid #30363d; }
+.stat { display:flex; justify-content:space-between; font-size:12px; padding:2px 0; }
+.stat span:last-child { color:#58a6ff; }
+.btn { width:100%; padding:7px; margin:2px 0; background:#21262d; border:1px solid #30363d; color:#e6edf3; cursor:pointer; font-family:monospace; font-size:12px; border-radius:4px; }
+.btn:hover { background:#30363d; }
+.btn.red { border-color:#f85149; color:#f85149; }
+.btn.green { border-color:#3fb950; color:#3fb950; }
+#log { font-size:10px; color:#8b949e; height:100px; overflow-y:auto; background:#010409; padding:6px; border-radius:4px; }
+</style>
+</head>
+<body>
+<h1>Muto RS <span>RTAB-Map</span> Live</h1>
+<div id="status">
+  <span id="s-ws"><span class="dot warn"></span>Verbinden...</span> |
+  <span id="s-map">Map: wacht</span> |
+  <span id="s-scan">Scan: wacht</span> |
+  <span id="s-odom">Odom: wacht</span>
+</div>
+<div id="main">
+<canvas id="cv"></canvas>
+<div id="sidebar">
+  <div class="panel">
+    <h3>Positie</h3>
+    <div class="stat"><span>X</span><span id="px">-</span></div>
+    <div class="stat"><span>Y</span><span id="py">-</span></div>
+    <div class="stat"><span>Yaw</span><span id="pyaw">-</span></div>
+  </div>
+  <div class="panel">
+    <h3>RTAB Stats</h3>
+    <div class="stat"><span>Frames</span><span id="rframes">-</span></div>
+    <div class="stat"><span>Map cellen</span><span id="rcells">-</span></div>
+    <div class="stat"><span>Resolutie</span><span id="rres">-</span></div>
+  </div>
+  <div class="panel">
+    <h3>Robot Control</h3>
+    <button class="btn" onmousedown="drive(18)" onmouseup="stop()">▲ Vooruit</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:2px;margin:2px 0">
+      <button class="btn" onmousedown="drive(20)" onmouseup="stop()" title="Zijwaarts links">◄◄</button>
+      <button class="btn" onmousedown="drive(22)" onmouseup="stop()" title="Draaien links">↺</button>
+      <button class="btn red" onclick="stop()">■</button>
+      <button class="btn" onmousedown="drive(23)" onmouseup="stop()" title="Draaien rechts">↻</button>
+      <button class="btn" onmousedown="drive(21)" onmouseup="stop()" title="Zijwaarts rechts">►►</button>
+    </div>
+    <button class="btn" onmousedown="drive(19)" onmouseup="stop()">▼ Achteruit</button>
+    <div style="font-size:10px;color:#8b949e;margin-top:4px;text-align:center">◄◄ zij-links | ↺↻ draaien | ►► zij-rechts</div>
+  </div>
+  <div class="panel">
+    <h3>Kaart</h3>
+    <button class="btn green" onclick="saveMap()">Opslaan</button>
+    <button class="btn" onclick="resetMap()">Reset</button>
+  </div>
+  <div class="panel">
+    <h3>Log</h3>
+    <div id="log"></div>
+  </div>
+</div>
+</div>
+<script>
+var WS = null;
+var mapData = null;
+var pose = {x:0, y:0, yaw:0};
+var scan = [];
+var canvas, ctx, scale = 80, offset = {x:0, y:0}, drag = false, dragPt = {x:0,y:0};
+
+function log(msg, col) {
+  var el = document.getElementById("log");
+  var d = document.createElement("div");
+  d.style.color = col || "#8b949e";
+  d.style.borderBottom = "1px solid #1c2128";
+  d.style.padding = "1px 0";
+  d.textContent = new Date().toLocaleTimeString() + " " + msg;
+  el.insertBefore(d, el.firstChild);
+  if (el.children.length > 40) el.removeChild(el.lastChild);
+}
+
+function setStatus(id, ok, txt) {
+  var el = document.getElementById(id);
+  el.innerHTML = "<span class='dot " + (ok ? "ok" : "warn") + "'></span>" + txt;
+}
+
+function connect() {
+  WS = new WebSocket("ws://192.168.68.88:9090");
+  WS.onopen = function() {
+    setStatus("s-ws", true, "Verbonden");
+    log("Verbonden", "#3fb950");
+    sub("/map", "nav_msgs/msg/OccupancyGrid");
+    sub("/scan", "sensor_msgs/msg/LaserScan");
+    // AMCL-gecorrigeerde pose i.p.v. ruwe /odom -- zo laat de scan-overlay
+    // zien of AMCL's schatting klopt met de kaart (10 aug 2026).
+    sub("/amcl_pose", "geometry_msgs/msg/PoseWithCovarianceStamped");
+    //sub("/mapPath", "nav_msgs/msg/Path");
+    WS.send(JSON.stringify({op:"advertise", topic:"/cmd_vel", type:"geometry_msgs/msg/Twist"}));
+  };
+  WS.onclose = function() {
+    setStatus("s-ws", false, "Verbroken");
+    log("Verbroken, herverbinden...", "#f85149");
+    setTimeout(connect, 3000);
+  };
+  WS.onerror = function() { log("WebSocket fout", "#f85149"); };
+  WS.onmessage = function(e) {
+    try { handle(JSON.parse(e.data)); } catch(x) {}
+  };
+}
+
+function sub(topic, type) {
+  WS.send(JSON.stringify({op:"subscribe", topic:topic, type:type, throttle_rate:500}));
+}
+
+function handle(msg) {
+  if (msg.op !== "publish") return;
+  var t = msg.topic;
+  if (t === "/map") onMap(msg.msg);
+  else if (t === "/scan") onScan(msg.msg);
+  else if (t === "/amcl_pose") onOdom(msg.msg);
+  else if (t === "/mapPath") onPath(msg.msg);
+}
+
+function onMap(m) {
+  mapData = m;
+  setStatus("s-map", true, "Map: OK");
+  var cells = m.data.filter(function(v){return v > 50;}).length;
+  document.getElementById("rcells").textContent = cells;
+  document.getElementById("rres").textContent = (m.info.resolution*100).toFixed(1) + "cm";
+  draw();
+}
+
+function onScan(m) {
+  setStatus("s-scan", true, "Scan: OK");
+  scan = [];
+  for (var i = 0; i < m.ranges.length; i++) {
+    var r = m.ranges[i];
+    if (r > m.range_min && r < m.range_max) {
+      var a = m.angle_min + i * m.angle_increment + pose.yaw;
+      scan.push({x: pose.x + r*Math.cos(a), y: pose.y + r*Math.sin(a)});
+    }
+  }
+  draw();
+}
+
+function onOdom(m) {
+  setStatus("s-odom", true, "Odom: OK");
+  var p = m.pose.pose;
+  pose.x = p.position.x;
+  pose.y = p.position.y;
+  var q = p.orientation;
+  pose.yaw = Math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z));
+  document.getElementById("px").textContent = pose.x.toFixed(3)+"m";
+  document.getElementById("py").textContent = pose.y.toFixed(3)+"m";
+  document.getElementById("pyaw").textContent = (pose.yaw*180/Math.PI).toFixed(1)+"deg";
+  draw();
+}
+
+function onPath(m) {
+  var n = m.poses ? m.poses.length : 0;
+  document.getElementById("rframes").textContent = n;
+}
+
+function w2c(wx, wy) {
+  return {
+    x: canvas.width/2 + (wx - offset.x)*scale,
+    y: canvas.height/2 - (wy - offset.y)*scale
+  };
+}
+
+function draw() {
+  ctx.fillStyle = "#010409";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (mapData) {
+    var info = mapData.info;
+    var res = info.resolution;
+    var ox = info.origin.position.x;
+    var oy = info.origin.position.y;
+    var ps = Math.max(1, res*scale);
+    for (var row = 0; row < info.height; row++) {
+      for (var col = 0; col < info.width; col++) {
+        var v = mapData.data[row*info.width+col];
+        if (v < 0) continue;
+        var cp = w2c(ox+col*res, oy+row*res);
+        ctx.fillStyle = v > 50 ? "#e6edf3" : "#1c2128";
+        ctx.fillRect(cp.x, cp.y, ps, ps);
+      }
+    }
+  }
+  ctx.fillStyle = "#f0883e";
+  for (var i = 0; i < scan.length; i++) {
+    var sp = w2c(scan[i].x, scan[i].y);
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 2, 0, 6.28);
+    ctx.fill();
+  }
+  var rp = w2c(pose.x, pose.y);
+  ctx.save();
+  ctx.translate(rp.x, rp.y);
+  ctx.rotate(-pose.yaw);
+  ctx.fillStyle = "#58a6ff";
+  ctx.beginPath();
+  ctx.moveTo(12,0); ctx.lineTo(-8,-7); ctx.lineTo(-8,7); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function send(obj) {
+  if (WS && WS.readyState === 1) WS.send(JSON.stringify(obj));
+}
+
+var driveTimer = null;
+
+function twist(lx, ly, az) {
+  send({op:"publish", topic:"/cmd_vel", type:"geometry_msgs/msg/Twist", msg:{
+    linear:{x:lx, y:ly, z:0.0},
+    angular:{x:0.0, y:0.0, z:az}
+  }});
+}
+
+function drive(cmd) {
+  var labels = {18:"Vooruit",19:"Achteruit",20:"Zij-links",21:"Zij-rechts",22:"Draai-L",23:"Draai-R"};
+  var twists = {
+    18:[0.15, 0.0, 0.0],
+    19:[-0.15, 0.0, 0.0],
+    20:[0.0, 0.15, 0.0],
+    21:[0.0, -0.15, 0.0],
+    22:[0.0, 0.0, 0.5],
+    23:[0.0, 0.0, -0.5]
+  };
+  log("Drive: " + (labels[cmd]||cmd), "#58a6ff");
+  if (driveTimer) clearInterval(driveTimer);
+  var t = twists[cmd];
+  twist(t[0], t[1], t[2]);
+  driveTimer = setInterval(function(){ twist(t[0], t[1], t[2]); }, 200);
+}
+
+function stop() {
+  if (driveTimer) { clearInterval(driveTimer); driveTimer = null; }
+  log("Stop", "#d29922");
+  twist(0.0, 0.0, 0.0);
+}
+
+function saveMap() {
+  send({op:"call_service", service:"/rtabmap/backup", type:"std_srvs/srv/Empty", args:{}});
+  log("Kaart opgeslagen", "#3fb950");
+}
+
+function resetMap() {
+  send({op:"call_service", service:"/rtabmap/reset", type:"std_srvs/srv/Empty", args:{}});
+  log("Kaart gereset", "#d29922");
+}
+
+window.onload = function() {
+  canvas = document.getElementById("cv");
+  ctx = canvas.getContext("2d");
+  function resize() {
+    canvas.width = window.innerWidth - 300;
+    canvas.height = window.innerHeight - 68;
+    draw();
+  }
+  window.addEventListener("resize", resize);
+  resize();
+  canvas.addEventListener("mousedown", function(e){ drag=true; dragPt={x:e.clientX,y:e.clientY}; e.preventDefault(); e.stopPropagation(); });
+  canvas.addEventListener("mousemove", function(e){
+    if (!drag) return;
+    offset.x -= (e.clientX-dragPt.x)/scale;
+    offset.y += (e.clientY-dragPt.y)/scale;
+    dragPt={x:e.clientX,y:e.clientY};
+    draw();
+  });
+  canvas.addEventListener("mouseup", function(){ drag=false; });
+  canvas.addEventListener("mouseleave", function(){ drag=false; });
+  document.addEventListener("mouseup", function(){ drag=false; });
+  window.addEventListener("blur", function(){ drag=false; });
+  canvas.addEventListener("wheel", function(e){
+    e.preventDefault();
+    scale = Math.max(10, Math.min(400, scale*(e.deltaY<0?1.15:0.87)));
+    draw();
+  });
+  connect();
+  setInterval(draw, 2000);
+};
+</script>
+</body>
+</html>
