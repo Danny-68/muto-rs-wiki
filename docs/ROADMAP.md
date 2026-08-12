@@ -96,8 +96,12 @@ Het rf2o-rotatie-onderzoek (broncode-analyse → literatuur → zes schone draai
 
 Op basis daarvan liggen nu vier paden open, elk apart testbaar:
 
-**Pad A — Sensorarchitectuur (laagste drempel, geen nieuwe code, staat al klaar)**
-Externe IMU terug als primaire yaw-bron in `ekf_params.yaml` (`imu0_config` yaw/vyaw weer aan), `imu1` (STM32-onboard, 2Hz-beperkt) uit of secundair, rf2o (`odom0_config`) strikt tot x/y. Meten: rotatieburst-vs-IMU-ratio herhalen (`isolate_odomfused_vs_imu.py`), doel dicht bij 1,0× op `/odom_fused`.
+**Pad A — Sensorarchitectuur — ✅ UITGEVOERD (11 aug 2026), forse verbetering, niet perfect.**
+`ekf_params.yaml` aangepast: externe IMU (`imu0`) weer aan als enige yaw-bron (yaw+vyaw), `imu1` (STM32-onboard, 2Hz-beperkt) volledig uit, rf2o (`odom0`) blijft strikt tot x/y beperkt — één variabele tegelijk gewijzigd, zelfde methodologie als de eerdere isolatietests. Twee rotatieburst-tests (`isolate_odomfused_vs_imu.py`, phoenix_driver tripod-gait, 10s burst):
+- Meting 1: IMU +12,0° → `/odom_fused` +9,0° → **ratio 0,74×**
+- Meting 2: IMU +15,8° → `/odom_fused` +13,3° → **ratio 0,84×**
+
+Gemiddeld ~0,79×, beide een onderschatting (i.p.v. rf2o's eerdere overschatting), en met een veel kleinere spreiding dan rf2o's eigen 2,4-3,4×-schommelingen. **Duidelijke verbetering** (fout van >140% naar ~20%), maar nog niet 1,0×. Resterende afwijking mogelijk van de EKF's eigen linearisatie/filtering (zie Pad C) of een kleinere restgevoeligheid van de externe IMU tijdens de gait — nog niet verder uitgesplitst.
 
 **Pad B — Gait verzachten (nieuw, volgt direct uit de bevestigde oorzaak)**
 Als de fout specifiek van de *niet-gladde* beweging komt, kan een vloeiendere gait-variant (minder lift-amplitude, langzamere cadans, minder abrupte fase-overgangen in `phoenix_gait.py`) de rf2o-fout structureel verkleinen — mogelijk genoeg om rf2o ook tíjdens het lopen bruikbaar te maken. Test: rotatieburst-ratio meten bij een paar verschillende "gladheids"-instellingen, kijken of er een trend richting 1,0× ontstaat. Nog niet gedaan.

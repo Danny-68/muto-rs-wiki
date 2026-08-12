@@ -25,26 +25,29 @@ ekf_filter_node:
     odom0_differential: false
     odom0_relative: false
 
-    # ICM20948 (extern) yaw-rate TIJDELIJK UIT (11 aug 2026, gerichte check):
-    # om te isoleren of dit i.p.v. rf2o de bron van de ~2.8x-overschatting is.
+    # ICM20948 (extern) -- PAD A (11 aug 2026): terug AAN als primaire yaw-bron.
+    # Root cause van rf2o's overschatting is nu bevestigd (linearisatie-mismatch
+    # met de oscillerende gait, zie PROBLEMS.md/SLAM_NAV2.md) -- niet gedeeld
+    # met de servo-seriele-poort, dus niet beperkt tot de 2Hz-polling die
+    # imu1 (STM32-onboard) nodig had.
     imu0: /imu
     imu0_config: [false, false, false,
+                  false, false, true,
                   false, false, false,
-                  false, false, false,
-                  false, false, false,
+                  false, false, true,
                   false, false, false]
     imu0_queue_size: 10
     imu0_differential: false
     imu0_relative: false
     imu0_remove_gravitational_acceleration: false
 
-    # STM32-onboard-yaw (nieuw, 11 aug 2026, via phoenix_driver.py) -- zelfde
-    # sensor als robot_bridge.py's bewezen betrouwbare rotate_to_angle()
-    # (stabiel binnen ~0.1 graden in rust). Absolute yaw, vervangt rf2o's
-    # onbetrouwbare yaw-fusie hierboven.
+    # STM32-onboard-yaw -- PAD A: UIT, om externe IMU als enige yaw-bron
+    # schoon te testen (1 variabele tegelijk wijzigen, zelfde methodologie
+    # als de rf2o-isolatietests). phoenix_driver.py blijft /imu_stm32
+    # publiceren, alleen niet meer gefuseerd hier.
     imu1: /imu_stm32
     imu1_config: [false, false, false,
-                  false, false, true,
+                  false, false, false,
                   false, false, false,
                   false, false, false,
                   false, false, false]
