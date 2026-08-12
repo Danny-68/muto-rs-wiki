@@ -41,8 +41,10 @@ import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Imu
+from std_msgs.msg import Bool
 
 sys.path.insert(0, '/root')
 from phoenix_gait import PhoenixGait, HardwareInterface, GAITS, NEUTRAL_POS, ease
@@ -97,6 +99,17 @@ NEUTRAL_DURATION_S = 1.0  # TEST 11 aug 2026: 0.3s (3x sneller) geprobeerd om de
 # deze tijd aanhoudt, behandelen we het als een echte stop.
 STOP_DEBOUNCE_S = 0.5
 
+# Na een stop blijft het lichaam ~15-25s fysiek naslingeren (dempende
+# oscillatie, bevestigd via settle_curve_test.py, zie PROBLEMS.md) -- twee
+# pogingen om de stopsequentie zelf te versnellen/verzachten gaven geen
+# aantoonbaar effect. In plaats daarvan: een "pose_settling"-vlag publiceren
+# zodat AMCL/Nav2 de pose in dit venster als verhoogd-onzeker kan behandelen
+# i.p.v. te wachten op een kortere naslinger die niet blijkt te bestaan.
+# 24s is empirisch bepaald: bij alle drie geteste settle-curves was de
+# afwijking vanaf 24s consistent binnen 2-6%, terwijl 18-21s nog een
+# aangetoonde terugval liet zien.
+SETTLING_DURATION_S = 24.0
+
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -130,6 +143,7 @@ class PhoenixDriver(Node):
         self.global_phase = 0.0
         self.last_cmd = self.get_clock().now()
         self.zero_since = None
+        self.settling_until = None  # None = niet aan het naslingeren; anders rclpy.Time
 
         self.sub = self.create_subscription(Twist, 'cmd_vel', self.cb, 10)
         self.create_timer(0.3, self.timeout_check)
@@ -137,6 +151,9 @@ class PhoenixDriver(Node):
 
         self.imu_pub = self.create_publisher(Imu, 'imu_stm32', 10)
         self.create_timer(1.0 / STM32_IMU_HZ, self._publish_stm32_yaw)
+
+        self.settling_pub = self.create_publisher(Bool, 'pose_settling', 10)
+        self.create_timer(0.5, self._publish_settling)
         self.get_logger().info(
             'Phoenix driver gestart (tripod-only, PhoenixGait i.p.v. STM32-firmware-gait)')
 
@@ -242,6 +259,17 @@ class PhoenixDriver(Node):
             self.target_speed = 0.0
             self.state = 'idle'
             self.zero_since = None
+            self.settling_until = self.get_clock().now() + Duration(seconds=SETTLING_DURATION_S)
+
+    def _publish_settling(self):
+        settling = False
+        with self._lock:
+            if self.settling_until is not None:
+                if self.get_clock().now() < self.settling_until:
+                    settling = True
+                else:
+                    self.settling_until = None
+        self.settling_pub.publish(Bool(data=settling))
 
     def timeout_check(self):
         elapsed = (self.get_clock().now() - self.last_cmd).nanoseconds / 1e9
