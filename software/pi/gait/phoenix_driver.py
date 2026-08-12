@@ -86,7 +86,10 @@ MAX_ANGULAR_SPEED_RADPS = 0.055  # gekalibreerd 10 aug 2026, n=3, zie boven
 CMD_TIMEOUT_S = 5.0  # zelfde als de huidige live waarde in muto_driver_fixed.py
 CMD_DEADBAND = 0.02  # onder deze genormaliseerde waarde tellen we als "stil"
 DECEL_DURATION_S = 1.0
-NEUTRAL_DURATION_S = 1.0
+NEUTRAL_DURATION_S = 1.0  # TEST 11 aug 2026: 0.3s (3x sneller) geprobeerd om de
+                          # ~15-25s fysieke naslinger te verkorten -- geen
+                          # aantoonbaar effect (settle_curve_test.py, zelfde
+                          # convergentietijd), teruggezet naar 1.0s.
 # Live Nav2-test (10 aug 2026) toonde dat de controller vaak kort onder de
 # deadband duikt tijdens normale bijsturing (~elke 2.5-3s een dip) -- zonder
 # debounce triggerde dat elke keer de volledige (2s, blokkerende) stop-
@@ -209,6 +212,10 @@ class PhoenixDriver(Node):
         with self._lock:
             last_travel_x, last_rotate = self.travel_x, self.rotate
 
+        # TEST 11 aug 2026 (sway tijdens decel uitfaseren) GEEN AANTOONBAAR
+        # EFFECT op de naslinger -- teruggezet naar de oorspronkelijke,
+        # normale sway/dip tijdens decel. Zie PROBLEMS.md voor de
+        # settle_curve_test.py-resultaten van beide varianten.
         decel_steps = int(DECEL_DURATION_S * HZ)
         last_pos = None
         for _ in range(decel_steps):
