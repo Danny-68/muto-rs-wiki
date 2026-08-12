@@ -101,7 +101,19 @@ Op basis daarvan liggen nu vier paden open, elk apart testbaar:
 - Meting 1: IMU +12,0° → `/odom_fused` +9,0° → **ratio 0,74×**
 - Meting 2: IMU +15,8° → `/odom_fused` +13,3° → **ratio 0,84×**
 
-Gemiddeld ~0,79×, beide een onderschatting (i.p.v. rf2o's eerdere overschatting), en met een veel kleinere spreiding dan rf2o's eigen 2,4-3,4×-schommelingen. **Duidelijke verbetering** (fout van >140% naar ~20%), maar nog niet 1,0×. Resterende afwijking mogelijk van de EKF's eigen linearisatie/filtering (zie Pad C) of een kleinere restgevoeligheid van de externe IMU tijdens de gait — nog niet verder uitgesplitst.
+Gemiddeld ~0,79×, beide een onderschatting (i.p.v. rf2o's eerdere overschatting), en met een veel kleinere spreiding dan rf2o's eigen 2,4-3,4×-schommelingen. **Duidelijke verbetering** (fout van >140% naar ~20%), maar aanvankelijk nog niet 1,0×.
+
+**✅ Doorbraak (zelfde dag, "Pad 4"-onderzoek naar de resterende afwijking): het was een meettiming-artefact, geen echte fout.** `settle_curve_test.py` bemonsterde `/imu` en `/odom_fused` herhaaldelijk ná de stop (i.p.v. één keer na een vaste 2,5-3s), en onthulde dat de externe IMU (grondwaarheid) na een gait-stop nog **~15-25 seconden fysiek naslingert** (een dempende oscillatie, vermoedelijk het lichaam dat nawiebelt na `phoenix_driver.py`'s abrupte stopsequentie) — geen sensorfout, een echte, langzaam dempende restbeweging. Convergentiecurve:
+
+| t na stop | ratio |
+|---|---|
+| 1,4-13,0s | 0,73-0,79× |
+| 16,3-22,0s | 0,86-0,94× |
+| 25,4-38,2s | **0,96-1,00×** |
+
+**Conclusie: bij voldoende wachttijd (~25-30s) is Pad A vrijwel perfect (0,96-1,00×).** Alle eerdere "0,74-0,90×"-metingen van vandaag (Pad A, B, C) zijn gemeten tijdens deze naslinger-transient (fixed ~2,5-3s wachttijd in `isolate_odomfused_vs_imu.py`/`isolate_odomfused_vs_imu.py`-achtige scripts) — dus systematisch te vroeg. De onderliggende nauwkeurigheid van Pad A was al die tijd al (bijna) perfect; alleen de meetmethode onderschatte hem.
+
+**Nieuwe, praktische consequentie voor Nav2/AMCL:** de robot zelf/de EKF heeft na een stop wél echt ~15-25s nodig voor een volledig betrouwbare pose — Nav2 kan daar niet zomaar op wachten. Vervolgvragen: (a) kan de fysieke naslinger zelf verkort worden (een gedempter/geleidelijker stop in `phoenix_driver.py`'s `_do_stable_stop()`, i.p.v. de huidige ~2s decel+neutraal-interpolatie)? (b) moet de EKF/AMCL de eerste ~15-20s na een stop-commando als "verhoogd-onzeker" markeren i.p.v. de pose direct te vertrouwen? Beide nog niet getest.
 
 **Pad B — Gait verzachten — deels bevestigd op draaischijf, verrassend probleem op echte vloer.**
 Losse testvariant "soft_tripod" (`soft_gait_rotation_test.py`, standaard-TRIPOD-parameters niet gewijzigd): halve lift-hoogte (40→20mm), 50% langzamere cyclus (1,6→2,4s). Op de draaischijf: meerdere metingen 0,80-0,90× (t.o.v. standaard-tripod's 0,74-0,87×) — dichter bij 1,0×, gebruiker beoordeelde de beweging als "trager en minder lift, zag er goed uit". Stapgrootte vervolgens verhoogd op verzoek: 90mm (+50%) bleef goed (0,81×, geen zichtbare problemen), 120mm (verdubbeld) gaf duidelijke **slip** en ratio kelderde naar 0,38× — er zit dus een grens tussen 90-120mm.
