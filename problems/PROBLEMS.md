@@ -190,6 +190,17 @@ De twee fouten wijzen **tegengestelde kanten op** tussen bijna-identieke tests. 
 - **Oorzaak:** Verkeerde I2C bus (bus 1 i.p.v. bus 4)
 - **Fix:** `i2cdetect -y 4` (bus 4, niet bus 1)
 
+### `/odom_fused`-ratio verslechtert geleidelijk over een lange testreeks, los van gait-type (11 aug 2026)
+- **Symptoom:** tijdens de Pad B/C-vergelijkingstests (zie rf2o-sectie hierboven) verslechterde de rotatieburst-ratio gestaag over opeenvolgende metingen — 0,85× → 0,85× → 0,80× → 0,60× → 0,40× — **ongeacht** of het standaard-tripod of de zachte-tripod-variant was, en ongeacht EKF vs. UKF.
+- **Uitgesloten als oorzaak:**
+  - **Batterij:** 7,8V / 93% gemeten (`Muto.read_battery()`) — gezond, geen laag-batterij-signaal.
+  - **Mechanische vermoeidheid:** de laatste standaard-tripod-test in de reeks gaf weer een normale fysieke rotatie (9,6° IMU-gemeten, in lijn met eerdere metingen) — de servo's/gait zelf presteren dus niet slechter.
+  - **Tijdgebonden IMU-drift:** de externe IMU bleek in rust zeer stabiel (0,11° spreiding over 8s stilstand) — geen drift-over-tijd los van beweging.
+- **Twee nog niet definitief onderscheiden hypotheses:**
+  1. **Richtingsafhankelijke magnetometerfout:** de externe IMU heeft een al langer bekend, nooit opgelost hard/soft-iron-kalibratieprobleem (zie TIMELINE.md "Open punten"). Na alle rotaties van vandaag staat de robot op een andere absolute richting dan bij de eerste tests van de sessie — als de magnetometer daar slechter presteert, verklaart dat een verslechterende ratio zonder dat gait/filtertype de oorzaak is.
+  2. **Voedingsgerelateerd (geopperd door de gebruiker, nog niet getest):** als Raspberry Pi en de MUTO-servo's/IMU **dezelfde batterij/voedingsrail** delen, kan de stroompiek tijdens een actieve gait-burst (18 servo's tegelijk) een spanningsdip veroorzaken die de Pi's sensoren/timing tijdelijk verstoort — zelfs bij een op zichzelf gezonde batterijstand (93% rust-metingen zeggen niets over spanningsdips ONDER belasting, die niet gemeten zijn). Zou pleiten voor een **tweede, gescheiden batterij** voor Raspberry Pi vs. de MUTO-aandrijving. Nog te testen: spanning meten vlak vóór/na een gait-burst (niet tijdens, i.v.m. seriële-poort-exclusiviteit) over meerdere herhalingen, om te zien of de rust-spanning zelf ook geleidelijk daalt.
+- **Consequentie voor lopend onderzoek:** de fijnmazige Pad B/C-vergelijking (welke ratio bij welke gait/filter-instelling) is vanaf dit punt in de sessie niet meer betrouwbaar te interpreteren — een verslechterend, niet-gait-gebonden effect vervuilt de vergelijking. Vervolgtests lopen door om de trend verder te karakteriseren (zie TIMELINE/ROADMAP).
+
 ---
 
 ## 💻 Pi CPU Overbelasting
