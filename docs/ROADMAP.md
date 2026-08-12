@@ -4,6 +4,36 @@ Overkoepelend statusoverzicht van de grote visie: een volledig autonome, natuurl
 
 ---
 
+## 🎯 Puntenlijst voor de volgende sessie (bijgewerkt 11 augustus 2026, avond)
+
+Deze sessie liep aan het eind te veel tests en aannames door elkaar (rf2o-onderzoek, Pad A/B/C, stopsequentie-experimenten, Nav2-poging, open-loop-vooruit-tests) — dit is de ontwarde, één-voor-één-lijst om vanaf te werken. **Niet meerdere punten tegelijk aanpakken.**
+
+### ✅ Definitief opgelost/bevestigd (niet opnieuw onderzoeken)
+1. **rf2o's rotatie-overschatting (2,4-3,4× tijdens gait) — root cause gevonden en empirisch bevestigd.** rf2o zelf is accuraat (0,97-1,02× op een schone draaischijf-test); de oscillerende, niet-gladde gait-beweging schendt rf2o's lineaire "gladde-verplaatsing"-aanname. Geen codefout, geen vaste schaalfout.
+2. **Pad A (externe IMU als yaw-bron, rf2o alleen x/y) werkt, en de "resterende 18%" was een meettiming-artefact**, geen echte fout. Na een stop naslingert het lichaam fysiek ~15-25s (dempende oscillatie); bij ≥24s wachten convergeert de ratio naar 0,96-1,00×.
+3. **`/pose_settling`-topic geïmplementeerd en getest werkend** in `phoenix_driver.py` — `true` gedurende 24s na elke stop, daarna `false`. Bouwsteen, nog niet geconsumeerd door Nav2/AMCL-kant.
+4. **Twee stopsequentie-experimenten (sway-uitfasering, snellere neutraal-overgang) gaven geen effect** op de naslinger-duur — niet meer proberen, `phoenix_driver.py` staat terug op origineel (geverifieerd via diff).
+5. **Pad C (UKF i.p.v. EKF): geen nauwkeurigheidswinst, wel betere herhaalbaarheid** (0,85/0,85× vs. EKF's 0,74/0,84×). Geen dringende reden om te wisselen.
+
+### 🔴 Nieuw, nog open, hoogste prioriteit — één voor één aanpakken
+1. **Nieuwe, onverklaarde zijwaartse drift tijdens recht-vooruit-lopen met phoenix_gait tripod, leidde tot een botsing tegen een deurpost (geen schade).** Dit is verrassend omdat phoenix_gait destijds uitvoerig getest is met minimale drift — de oorzaak is dus vermoedelijk iets van déze sessie, niet de gait zelf. Kandidaten, nog niet onderscheiden:
+   - Mechanische verstoring van de poten-neutraalstand door de vele torque-uit/aan-cycli van vandaag (splay-stand, `get_up_from_deep.py`, draaischijf).
+   - Vloer/locatie-specifiek (drempel/oneffenheid bij de deurpost).
+   - **Vervolgtest (nog te doen):** een schone rechte-lijn-test op een aantoonbaar vlakke plek, ver van drempels/obstakels, met volledige 27s+ wachttijd — en eerst controleren of de poten-neutraalstand nog symmetrisch is t.o.v. eerdere, drift-vrije sessies.
+   - Een tweede, kortere (1m) herhaling gaf ook alweer ~10° koersafwijking (X/Y-verhouding in `/odom_fused`, ditmaal wél met correcte 27s wachttijd) — dus dit lijkt een reëel, herhaalbaar fenomeen, geen eenmalig toeval.
+2. **Nav2/AMCL-initial-pose-workflow moet zorgvuldiger** dan de snelle gok van vandaag ((0,0,0°) bleek in "lethal space" te liggen — costmap dacht dat het startpunt zelf een obstakel was, vandaar de ABORTED-navigatiepoging). Dit was geen regressie van de odometrie-fixes, puur een slechte gok. Gebruik weer de gemarkeerde-kaart-feedback-loop (`mark_amcl_pose.py`) totdat de positie herhaaldelijk bevestigd is, vóór een nieuwe `NavigateToPose`-poging.
+3. **`/pose_settling` daadwerkelijk consumeren** aan Nav2/AMCL-kant (bijv. `guarded_navigate_test.py` verder afmaken — bestaat al, wacht al op settling, maar de navigatiepoging zelf faalde nog op punt 2 hierboven, niet getest of de settling-gate zelf werkt in de praktijk).
+4. **Pad B (zachte gait) blijft on hold** — werkte goed op de draaischijf (0,80-0,90×) maar gaf afzet-slip op de echte vloer (ratio zakte naar 0,58×). Fysieke inspectie van de looppunten (materiaal/slijtage) staat nog open, nog niet gedaan.
+
+### 🟡 Bekend maar lagere prioriteit
+- Welk exact aspect van de gait (frequentie, amplitude, fase) rf2o tijdens het lopen laat mislukken — nu overbodig geworden nu Pad A het praktisch oplost, maar interessant voor dieper begrip.
+- Zijwaartse beweging (`travel_z` in `phoenix_gait.py`) is nooit aangesloten in `phoenix_driver.py`'s `cmd_vel`-callback — potentieel nuttig, geen concrete stappen ondernomen.
+
+### Advies voor de volgende sessie
+Begin met punt 1 (de nieuwe drift) vóórdat Nav2 opnieuw geprobeerd wordt — een navigatietest bovenop een onverklaarde drift stapelt onzekerheden op. Doe dit met kleine, geïsoleerde stappen (zoals vandaag bij het rf2o-onderzoek), niet meerdere gelijktijdige aanpassingen.
+
+---
+
 ## De visie
 
 ```
