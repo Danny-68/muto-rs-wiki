@@ -121,6 +121,17 @@ Gemiddeld ~0,79×, beide een onderschatting (i.p.v. rf2o's eerdere overschatting
 
 **Beide wijzigingen teruggedraaid** naar de oorspronkelijke `phoenix_driver.py` (geverifieerd via diff tegen de wiki-mirror: functioneel identiek, alleen documentatie-commentaar toegevoegd). **Werkconclusie:** de bron van de naslinger zit dieper dan de stopsequentie-timing — waarschijnlijk mechanisch (lichaam/poten hebben na een verstoring nu eenmaal ~25-30s nodig om vlak te vallen, ongeacht hoe de laatste beweging eruitziet) of een langzame tijdconstante in de IMU's eigen interne filter. **Vervolgrichting:** niet verder zoeken naar een kortere stopsequentie, maar optie (b) — de EKF/AMCL de eerste ~25-30s na een stop-commando als "verhoogd-onzeker" laten behandelen i.p.v. de pose direct te vertrouwen. Nog niet geïmplementeerd.
 
+**✅ Minimale veilige wachttijd bepaald (analyse van de drie `settle_curve_test.py`-runs samen):**
+
+| t na stop | max. afwijking van 1,0× (over 3 runs) |
+|---|---|
+| 3-15s | 23-43% — volledig onbetrouwbaar |
+| 18s | 6% — grens van bruikbaar, maar... |
+| 21s | 14% — nog een terugval in één van de drie runs |
+| **24-39s** | **2-6%, consistent over alle drie runs** |
+
+**Vuistregel: minimaal ~24 seconden wachten** na een stop voordat een yaw-meting (of AMCL-pose-update) betrouwbaar is. Onder de 18s is de afwijking soms enorm (tot 43%); tussen 18-21s lijkt het bijna goed maar met een aangetoonde terugval; vanaf 24s bleef het in alle drie de onafhankelijke metingen stabiel klein. Deze 24s-drempel is nu de concrete waarde om te gebruiken bij het implementeren van optie (b) hierboven (EKF/AMCL-onzekerheid na een stop).
+
 **Pad B — Gait verzachten — deels bevestigd op draaischijf, verrassend probleem op echte vloer.**
 Losse testvariant "soft_tripod" (`soft_gait_rotation_test.py`, standaard-TRIPOD-parameters niet gewijzigd): halve lift-hoogte (40→20mm), 50% langzamere cyclus (1,6→2,4s). Op de draaischijf: meerdere metingen 0,80-0,90× (t.o.v. standaard-tripod's 0,74-0,87×) — dichter bij 1,0×, gebruiker beoordeelde de beweging als "trager en minder lift, zag er goed uit". Stapgrootte vervolgens verhoogd op verzoek: 90mm (+50%) bleef goed (0,81×, geen zichtbare problemen), 120mm (verdubbeld) gaf duidelijke **slip** en ratio kelderde naar 0,38× — er zit dus een grens tussen 90-120mm.
 
