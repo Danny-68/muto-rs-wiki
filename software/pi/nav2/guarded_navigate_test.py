@@ -51,9 +51,10 @@ def quat_from_yaw(yaw):
 
 
 class GuardedNavigate(Node):
-    def __init__(self, distance_m):
+    def __init__(self, distance_m, angle_offset_deg=0.0):
         super().__init__('guarded_navigate_test')
         self.distance_m = distance_m
+        self.angle_offset_rad = math.radians(angle_offset_deg)
         self.settling = None
         self.amcl_pose = None
         self.create_subscription(Bool, 'pose_settling', self._settling_cb, 10)
@@ -86,7 +87,8 @@ class GuardedNavigate(Node):
         return False
 
     def send_forward_goal(self):
-        x0, y0, yaw = self.amcl_pose
+        x0, y0, yaw0 = self.amcl_pose
+        yaw = yaw0 + self.angle_offset_rad
         gx = x0 + self.distance_m * math.cos(yaw)
         gy = y0 + self.distance_m * math.sin(yaw)
         gz, gw = quat_from_yaw(yaw)
@@ -127,8 +129,9 @@ class GuardedNavigate(Node):
 
 def main():
     distance_m = float(sys.argv[1]) if len(sys.argv) > 1 else 2.0
+    angle_offset_deg = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
     rclpy.init()
-    node = GuardedNavigate(distance_m)
+    node = GuardedNavigate(distance_m, angle_offset_deg)
 
     if not node.wait_for_settled():
         print("[guarded_nav] afgebroken: pose kwam niet tot rust")

@@ -16,7 +16,7 @@ node = Node('set_initial_pose')
 pub = node.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
 
 import time
-time.sleep(1.0)  # laat de publisher discoveren
+time.sleep(2.5)  # laat de publisher discoveren (1.0s bleek te kort -- AMCL ontving het bericht niet)
 
 msg = PoseWithCovarianceStamped()
 msg.header.frame_id = 'map'
@@ -33,7 +33,9 @@ msg.pose.covariance = cov
 
 pub.publish(msg)
 time.sleep(0.5)
-pub.publish(msg)  # nogmaals voor de zekerheid
+pub.publish(msg)
+time.sleep(0.5)
+pub.publish(msg)  # driemaal voor de zekerheid
 print(f"initialpose gepubliceerd: x={x} y={y} yaw={yaw_deg} graden")
 node.destroy_node()
 rclpy.shutdown()
