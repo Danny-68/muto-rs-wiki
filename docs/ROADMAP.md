@@ -72,6 +72,33 @@ Begin met punt 1 (zorgvuldige AMCL-initial-pose) en werk door naar punt 3 (een e
 
 ---
 
+## 🌙 Eindstatus sessie 11 augustus 2026 (laat op de avond) — vertrekpunt voor de volgende keer
+
+Na de 180°-laser-TF-fix en de bevestigde, correcte pose (x=-1,648, y=-0,870, yaw=162,5°, zie hierboven) is geprobeerd de robot naar een door de gebruiker op de kaart aangewezen deuropening te laten draaien. Dit onthulde twee nieuwe, nog onopgeloste punten:
+
+### ⚠️ Bijna-incident #2: blinde 50s-rotatie met niet-gevalideerde linksom-snelheid
+Voor de draai naar de deuropening (berekend doel: +139,2° in kaart-yaw = linksom) is de **rechtsom**-snelheid van vanavond (0,049 rad/s, gekalibreerd ná de IMU-verplaatsing) zonder verificatie ook voor **linksom** aangenomen. Eén lange, blinde 50s-burst (dezelfde risicovolle aanpak die eerder vanavond al als onveilig was bestempeld — zie de eerdere "Bijna-incident: runaway in het eerste, adaptieve kalibratiescript") leidde tot een door de gebruiker geschatte ~200° rotatie i.p.v. de bedoelde 139°. Robot direct gestopt op gebruikersverzoek, geen schade. **Les (herhaald, nu extra nadrukkelijk):** nooit een enkele lange rotatieduur uitvoeren op basis van een voor die richting/dat moment niet-gevalideerde snelheid — ook niet voor praktische doelen, niet alleen voor testscripts. Linksom-snelheid met de verplaatste IMU is nog steeds niet apart gekalibreerd.
+
+### ⚠️ Stapsgewijze correctiepoging: inconsistente resultaten, twee losse bugs gevonden
+Vervolgens is geprobeerd stapsgewijs (3× ~30° rechtsom, met IMU-controle tussen elke stap) een gebruiker-geschatte -90°-correctie te doen. Resultaat: **-73,3° cumulatief gemeten (IMU)**, terwijl AMCL na afloop **-102,1°** t.o.v. het startpunt liet zien — de twee meetmethoden verschillen ~29° van elkaar, en AMCL's covariantie was op dat moment ook verhoogd (0,42, minder confident dan de eerdere 0,20-0,26).
+
+Twee losse problemen geïdentificeerd:
+1. **Wachttijd-bug in `incremental_rotate.py`:** de "27s-naslinger-wachttijd" tussen segmenten gebruikte `spin_once(timeout_sec=1.0)` in een lus van 27 iteraties i.p.v. een expliciete `time.sleep(27)`. `spin_once` keert terug zodra er een bericht binnenkomt, dus als IMU-berichten sneller dan elke seconde binnenkomen (aannemelijk), duurde de "wachttijd" in werkelijkheid veel korter dan 27s — de tussenmetingen zijn dus mogelijk genomen vóórdat de fysieke naslinger volledig was uitgedempt. **Fix nog niet doorgevoerd:** altijd expliciete `time.sleep()` gebruiken voor een wachttijd die een gegarandeerde reële duur moet hebben, nooit een spin-lus met een per-iteratie-timeout.
+2. **Efficiëntieverlies bij korte segmenten (hypothese, niet hard bevestigd):** de behaalde hoek (-73,3°) was kleiner dan bedoeld (-90°) terwijl de totale tijd meer dan 2× zo lang was als een simpele snelheidsberekening zou voorspellen. Waarschijnlijke verklaring: bij elk kort segment gaat verhoudingsgewijs veel tijd op aan optrek-ramp (phoenix_gait's `_speed_ramp`, ~0,4-1s tot volle snelheid) en de vaste ~2s stopsequentie (decel+neutraal) — bij een korte 10,7s-burst is dat een aanzienlijk deel van de tijd niet op volle snelheid, wat de effectieve gemiddelde snelheid verlaagt t.o.v. een langere, doorlopende rotatie. Nog niet apart getest/bevestigd.
+
+### Eindstatus: robot veilig gestopt, oriëntatie ONBEVESTIGD
+- **Positie:** blijft vermoedelijk correct (x≈-1,65, y≈-0,87 — geen reden om aan te nemen dat de positie is veranderd, alleen rotatie is uitgevoerd).
+- **Oriëntatie:** onzeker, ergens tussen de twee laatste, onderling tegenstrijdige metingen (yaw ≈ 89° volgens de IMU-som, ≈ 60,4° volgens AMCL — dus een verschil van ~29°). **Niet geverifieerd of de robot nu naar de deuropening kijkt.**
+- Robot is fysiek gestopt en door de gebruiker bevestigd veilig.
+
+### Concreet vertrekpunt voor de volgende sessie (vóór verder te gaan met Nav2/obstakel-vermijding)
+1. **Eerst een schone, betrouwbare heroriëntatie-check** — een verse gemarkeerde-kaartafbeelding (`mark_amcl_pose.py`) om de werkelijke huidige oriëntatie vast te stellen, zonder te vertrouwen op de tegenstrijdige metingen van vanavond.
+2. **Linksom-snelheid apart kalibreren** met de verplaatste IMU (zoals rechtsom al is gedaan: `rotation_calib_test.py sign=1`), vóór er weer een linksom-draai wordt gecommandeerd.
+3. **`incremental_rotate.py` repareren** (`time.sleep()` i.p.v. de spin-lus) vóór hergebruik, en de efficiëntie-hypothese (korte segmenten = trager per seconde) apart valideren.
+4. Pas daarna verder met de eerder geplande punten 1-3 (AMCL-initial-pose, `/pose_settling` consumeren, echte obstakel-vermijdende Nav2-test).
+
+---
+
 ## De visie
 
 ```
