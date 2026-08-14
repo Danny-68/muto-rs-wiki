@@ -478,3 +478,26 @@ De twee fouten wijzen **tegengestelde kanten op** tussen bijna-identieke tests. 
 - **Nog niet opgelost:** een betrouwbare, herhaalbare procedure voor volledige (positie + oriëntatie) AMCL-convergentie op deze kaart. Zie GAIT.md "Nog openstaand" voor vervolgstappen.
 - **Terugkerende observatie:** hoek 90° (robot-relatief) geeft consistent een ongeldige "0,00"-laseruitlezing over meerdere, uiteenlopende poses — mogelijk een vaste fysieke blinde hoek op de robot, nog niet apart bevestigd.
               - 
+
+---
+
+## 🧭 AMCL-lokalisatie: bewezen procedure + 180°-voor/achter-weergavebug (14 augustus 2026)
+
+### Korte rotatie-bursts geven te weinig bewegingssignaal voor AMCL-convergentie
+- **Symptoom:** herhaalde korte rotaties (18°, 45°) lieten de covariantie nauwelijks dalen, zowel bij de deuropening als in de gang.
+- **Werkende procedure:** `/reinitialize_global_localization` gevolgd door een **ononderbroken rotatie van ~2 volle cirkels** (`localization_spin2.py`, ~256s bij 0,049 rad/s), daarna de volle ~27s settling-tijd, daarna verifiëren — nooit alleen op covariantie vertrouwen (zie hieronder).
+- **Belangrijker en robuuster dan rotatie-only:** een brute-force grid-search over (x, y, yaw) samen die scoort hoeveel getransformeerde scanpunten op een "occupied"-kaartcel vallen (`xy_yaw_grid_match.py`, `wide_grid_match.py`). Veel scherpere, betrouwbaardere match dan yaw-only sweep of AMCL's eigen particle filter in deze kaart — 83-91% scanpunt-hitrate haalbaar. Voor een onbekende locatie op een grote kaart: eerst de echte (niet-lege) kaart-bounding-box bepalen via wall-pixel-dichtheid (niet de hele lege canvas doorzoeken).
+
+### Zowel covariantie als de losse raycast-check (`verify_amcl_pose.py`) kunnen misleiden
+- **Symptoom:** een pose met lage/goede covariantie bleek bij visuele controle (scan-overlay op de kaart, zie `lidar_overlay.py`) alsnog ~90-104° verkeerd. Omgekeerd gaf een door de gebruiker visueel bevestigde, correcte pose bij `verify_amcl_pose.py` juist grote afwijkingen op alle 4 richtingen.
+- **Conclusie:** `verify_amcl_pose.py` heeft vermoedelijk een hoek-conventiefout (rel_deg wordt zowel als raw-scan-index als als wereld-hoek-offset gebruikt, zonder rekening te houden met de 180°-laser-mounting-transform). **Niet meer als betrouwbare check gebruiken** zonder eerst de hoek-conventie te fixen tegen een live `tf2_echo`-meting.
+- **Wat wél werkt:** een visuele overlay van de live laserscan (getransformeerd naar kaart-frame via de AMCL-pose) bovenop de kaartafbeelding, plus expliciete bevestiging door de gebruiker dat de scan-omtrek de echte muren volgt (`lidar_overlay.py`).
+
+### 180°-symmetrie in scan-matching, ook buiten lange gangen
+- Niet alleen een lange rechte gang (bekend, eerdere sessies) maar ook een kleinere, min-of-meer symmetrische kamer bij de deuropening bleek een scan-matching-yaw te geven die **exact 180° verkeerd om** was t.o.v. de werkelijke voorkant van de robot — twee keer onafhankelijk bevestigd (kamer én gang, 14 aug 2026). De **positie** (x,y) uit de grid-search was in beide gevallen wel correct; alleen de yaw was ambigu.
+- **Definitieve manier om dit op te lossen:** géén verdere plaatje-interpretatie (bleek zelf ook foutgevoelig, meerdere keren verkeerd afgelezen deze sessie) — alleen directe visuele bevestiging door de gebruiker die zelf naar de robot kijkt, of een kleine, gemeten voorwaartse beweging waarvan de werkelijke richting geobserveerd wordt.
+
+### ⚠️ Belangrijke valkuil: "voorkant corrigeren" mag NOOIT de aan AMCL doorgegeven yaw wijzigen
+- **Fout die deze sessie gemaakt is:** bij het corrigeren van de voorkant-richting werd de hele pose (inclusief de yaw die naar `/initialpose` gepubliceerd wordt) met 180° gedraaid. Dat is **fout** — de scan-matching-yaw (die de scanpunten correct op de kaart plaatst) is de waarde die AMCL/Nav2 daadwerkelijk moet gebruiken voor navigatie, ongeacht welke kant een mens "voorkant" noemt.
+- **Juiste fix:** alleen de **weergave** (pijl in `lidar_overlay.py`) corrigeren met een apart, vast display-offset (`FRONT_DISPLAY_OFFSET_DEG = 180.0`, toegevoegd 14 aug 2026) — de scanpunten-transform en de aan AMCL/`/initialpose` doorgegeven yaw blijven op de rauwe, scan-matching-correcte waarde staan.
+- **Vermoedelijke root cause van de weergave-bug:** een verkeerd afgelezen richting bij een eerdere `tf2_echo base_link laser_scan_fix`-meting (in de diagnostische Python-scripts, niet in AMCL/Nav2's eigen URDF-gebaseerde TF-keten, die dit probleem niet lijkt te hebben).

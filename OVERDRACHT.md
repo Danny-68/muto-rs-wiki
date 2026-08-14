@@ -1,49 +1,54 @@
 # 🔄 Overdracht — lees dit eerst in een nieuwe sessie
 
-**Laatst bijgewerkt:** 11 augustus 2026, laat op de avond
-**Volledige details:** [docs/ROADMAP.md](docs/ROADMAP.md) sectie "🌙 Eindstatus sessie 11 augustus 2026", [problems/PROBLEMS.md](problems/PROBLEMS.md), [slam/SLAM_NAV2.md](slam/SLAM_NAV2.md)
+**Laatst bijgewerkt:** 14 augustus 2026, middag
+**Volledige details:** [problems/PROBLEMS.md](problems/PROBLEMS.md) sectie "🧭 AMCL-lokalisatie: bewezen procedure + 180°-voor/achter-weergavebug (14 augustus 2026)", [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ---
 
 ## Waar we nu staan (in één alinea)
 
-We hebben vanavond de rf2o-rotatie-overschatting definitief root-caused (gait-lineariseringsmismatch, geen sensorfout), Pad A (externe IMU voor yaw + rf2o alleen x/y) geeft **0,96-1,00× nauwkeurigheid** zodra je ≥24s wacht na een stop (`/pose_settling`-topic bouwt dit al in). Daarna kwam een AMCL-lokalisatieprobleem naar boven: de robot convergeerde confident maar **naar een compleet verkeerde pose**. Root cause gevonden door oudere sessie-transcripten te doorzoeken: een **180° laser-mounting-TF-fout** (Yahboom's officiële URDF heeft de correctie al ingebouwd, maar de YDLidar-driver gebruikte het verkeerde frame_id). Gefixt. Daarnaast bleek de externe IMU **vlak bij het metalen frame** onbetrouwbare metingen te geven (bevestigd via een kalibratietest, opgelost door de IMU te verplaatsen/isoleren). Na beide fixes: positie klopt, maar er resteert een **~95° oriëntatie-afwijking** die handmatig gecorrigeerd is — root cause daarvan nog niet gevonden. Daarna, bij een poging de robot naar een deuropening te draaien, liepen twee dingen mis (zie "Openstaande bugs" hieronder) waardoor de **huidige fysieke oriëntatie van de robot nu onbevestigd is**.
+Grote stap vooruit t.o.v. 11 augustus: er is nu een **bewezen, herhaalbare AMCL-lokalisatieprocedure** — een brute-force grid-search over (x, y, yaw) samen die scoort hoeveel scanpunten op een muur vallen (`xy_yaw_grid_match.py`/`wide_grid_match.py`), gevolgd door een visuele scan-overlay-bevestiging door de gebruiker (`lidar_overlay.py`). Onderweg zijn twee losse, belangrijke bugs gevonden en gefixt: (1) `incremental_rotate.py`'s settle-wachttijd gebruikte een `spin_once`-lus i.p.v. `time.sleep()` en wachtte dus geen echte 27s — gefixt; (2) de diagnostische scripts toonden de "voorkant"-pijl consequent 180° verkeerd om (twee keer onafhankelijk bevestigd, kamer én gang) — dit bleek een weergavebug in de eigen Python-tooling, **niet** in AMCL/Nav2's eigen TF-keten; gefixt met een apart display-only offset zodat de aan AMCL doorgegeven yaw (de scan-matching-correcte waarde) niet meer aangeraakt wordt.
 
-**Robot staat veilig stil.** Software-stack (lidar/rf2o/EKF/Nav2/phoenix_driver) draait nu **niet** — moet elke sessie opnieuw opgestart worden (container wordt regelmatig herstart, alle processen gaan dan verloren).
+Linksom-rotatiesnelheid is gekalibreerd: **~0,081 rad/s** (via de onboard STM32-IMU — de externe IMU gaf bij linksom-metingen inconsistente/zelfs verkeerd-om resultaten, terwijl de identieke test tegen de STM32-IMU wél consistent was, over 5 segmenten).
+
+**Belangrijke architectuurwijziging vanavond:** de gebruiker heeft de **externe ICM20948-IMU losgekoppeld** (voor de zekerheid, na een mislukte eerste Nav2-test). `imu_publisher.py` faalt nu structureel ("Timeout waiting for Magnetometer Ready") en is gestopt. EKF draait nu op een aangepaste config (`ekf_params_stm32_yaw.yaml`) die yaw uit de **onboard STM32-IMU** (`/imu_stm32`) haalt i.p.v. Pad A's externe IMU. Dit is dus terug naar de situatie van vóór Pad A (11 aug) — Pad A's externe-IMU-aanpak staat on hold zolang de sensor niet weer aangesloten is.
+
+Eén Nav2 `NavigateToPose`-test (30cm vooruit, bij de deuropening) **mislukte**: 17 recovery-pogingen in 58s, robot liep veel verder (>50cm, niet in rechte lijn) dan bedoeld — root cause nog niet onderzocht. Gebruiker heeft de robot daarna handmatig naar de gang verplaatst (meer ruimte) voor een herhaalde, voorzichtiger geobserveerde poging.
+
+**Robot staat momenteel stil in de gang**, lokalisatie daar bevestigd (grid-search 83% match + visuele bevestiging, positie x=-0,60 y=-3,80 in map-frame, voorkant-weergave gecorrigeerd). Software-stack draait (lidar/rf2o/EKF-met-STM32-yaw/phoenix_driver/Nav2), driver herstart met `python3 -u` voor directe logging (zie hieronder waarom).
 
 ---
 
 ## Direct te doen, in deze volgorde
 
-1. **Software-stack opnieuw opstarten.** Zie `software/pi/scripts/muto_fase1_start.sh` als basis, of volg de stappen die deze sessie steeds herhaald zijn: `app_muto.py` stoppen (blokkeert `/dev/myserial`) → lidar → `scan_timestamped.py` → `robot_state_launch.py` → rf2o → `imu_publisher.py` → UKF (`ekf_params.yaml`, Pad A-config staat er al goed in) → `phoenix_driver.py` → Nav2 (`hexapod_navigation.launch.py map:=/root/maps/lidar_only_map.yaml`).
-2. **⚠️ Controleer eerst of de 180°-laser-TF-fix nog actief is.** Dit is een losse `sed`-aanpassing in een container-lokaal bestand (`ydlidar_ros2_driver/params/ydlidar.yaml`, `frame_id: laser` → `frame_id: laser_scan_fix`) — gaat waarschijnlijk verloren bij een container-herstart. Check: `docker exec humble_run grep frame_id /root/yahboomcar_ros2_ws/software/library_ws_humble/install/ydlidar_ros2_driver/share/ydlidar_ros2_driver/params/ydlidar.yaml`. Zo niet, opnieuw toepassen (zie ROADMAP.md voor de volledige uitleg).
-3. **Verifieer of de externe IMU nog steeds op de verplaatste/geïsoleerde positie zit** (fysiek, niet software) — dit was een handmatige fysieke wijziging door de gebruiker, geen code-fix.
-4. **Een verse, betrouwbare heroriëntatie-check doen** — `mark_amcl_pose.py` gebruiken om de huidige, werkelijke oriëntatie vast te stellen. Vertrouw NIET op de laatst bekende waarden uit deze sessie (die zijn tegenstrijdig, zie hieronder).
-5. Pas daarna verder met: linksom-snelheid apart kalibreren, `incremental_rotate.py` repareren, en de eerder geplande Nav2-obstakel-vermijdingstest.
+1. **Onderzoek waarom de eerste Nav2 `NavigateToPose`-test (30cm, deuropening) 17 recoveries gaf en de robot veel verder liet lopen dan bedoeld.** Nog niet gediagnosticeerd — mogelijk costmap-probleem (zie eerdere `inflation_radius`-issue), mogelijk controller-tuning, mogelijk een lokalisatie-sprong tijdens het navigeren zelf. Check `/tmp/nav2.log` en de costmap-configuratie voordat je een volgende `NavigateToPose`-poging doet.
+2. **Externe IMU weer aansluiten (of definitief beslissen 'm te laten voor wat die is)** — zolang die loskoppeld blijft, draait alles op de STM32-onboard-yaw-config (`ekf_params_stm32_yaw.yaml`), niet Pad A. Als de externe IMU terugkomt: EKF weer terugzetten naar `ekf_params.yaml` (Pad A) én opnieuw goed testen of het linksom-inconsistentieprobleem (zie PROBLEMS.md) dan nog optreedt.
+3. **Vervolg Nav2-obstakeltest in de gang** (meer ruimte dan bij de deuropening) — met engere bewaking dan de vorige poging: controleer tussentijds `number_of_recoveries` en `distance_remaining`, en wees bereid vroeg te annuleren.
+4. **180°-laser-TF-fix blijft elke sessie checken** (container-lokale `sed`-aanpassing, niet persistent) — zie eerdere instructies, ongewijzigd.
+5. **`verify_amcl_pose.py` niet meer gebruiken** zonder eerst de hoek-conventie te fixen — zie PROBLEMS.md, geeft misleidende resultaten (zowel valse "klopt niet" als valse "klopt wel").
 
 ---
 
 ## Openstaande bugs (nog niet gefixt)
 
-- **Linksom-rotatiesnelheid nooit gevalideerd met de verplaatste IMU** — alleen rechtsom is gekalibreerd (~0,049 rad/s, zie `software/pi/tools/rotation_calib_test.py`). Een blinde aanname dat links even snel is als rechts veroorzaakte een overshoot (bedoeld 139°, geschat ~200° geworden) — robot direct gestopt, geen schade.
-- **`incremental_rotate.py`'s wachttijd-implementatie is kapot** — gebruikt een `spin_once(timeout_sec=1.0)`-lus i.p.v. `time.sleep()`, garandeert dus geen echte 27s wachttijd. Moet gerepareerd worden vóór hergebruik.
-- **Resterende ~95° oriëntatie-afwijking na de 180°-TF-fix** — root cause onbekend, mogelijk gerelateerd aan een eerder genoteerd `reversion`-parameterverschil met Yahboom's officiële YDLidar-config. Nu alleen handmatig gecorrigeerd via `/initialpose`, niet structureel opgelost.
-- **Twee tegenstrijdige eindmetingen van de laatste sessie:** IMU-cumulatief zei -73,3° rotatie, AMCL zei -102,1° (verschil ~29°) — geen van beide vertrouwd. De werkelijke huidige oriëntatie van de robot is dus onbekend totdat een verse, betrouwbare check gedaan is (zie stap 4 hierboven).
+- **Nav2 `NavigateToPose` liep veel verder dan het doel (30cm werd >50cm, 17 recoveries)** — root cause onbekend, zie punt 1 hierboven.
+- **Externe IMU geeft inconsistente/foutieve metingen specifiek bij linksom-rotatie** (4x snelheidsvariatie + één segment met omgekeerde richting), terwijl dezelfde test tegen de STM32-onboard-IMU wél consistent was. Nog niet onderzocht of dit een magnetometer-interferentie-probleem is dat specifiek bij linksom-beweging optreedt, of een resterend montageprobleem. Momenteel omzeild door de externe IMU los te koppelen en STM32-yaw te gebruiken — geen structurele fix.
+- **`phoenix_driver.py` kan stil crashen** (geen traceback, geen OOM, geen USB-disconnect zichtbaar in logs) — reden onbekend. Altijd `ps -eo pid,cmd | grep phoenix_driver.py` checken vóór/na elk bewegingscommando. Start voortaan met `python3 -u` (ongebufferd) zodat een crash direct zichtbaar is in de log i.p.v. pas bij het volgende flush-moment.
 
 ---
 
 ## Bewust uitgesteld (lagere prioriteit, met reden)
 
-- **Zijwaartse drift tijdens recht-vooruit-lopen** (2-4× groter dan de 10-augustus-baseline) — bewust naar lagere prioriteit gezet, want Nav2's closed-loop obstakel-vermijding zou dit grotendeels moeten compenseren zodra lokalisatie klopt. **Let op:** een deel van de eerder gemeten "extra drift" is mogelijk zelf een IMU-magnetometer-meetartefact geweest (gemeten vóór de IMU-verplaatsing) — nog niet herzien met de verbeterde IMU.
-- **Pad B (zachte gait-variant)** — werkte goed op een draaischijf maar gaf afzet-slip op de echte vloer. On hold, looppunten-inspectie nog nodig.
-- **Astra Pro Plus + ICP-pointcloud-odometrie** (voorstel van de gebruiker, 11 aug 2026 laat) — technisch degelijk voorstel (DOF-splitsing vloer/verticale-geometrie, IMU als ICP-initial-guess, kwaliteit-gestuurde covariantie), maar **bewust als stap-2-optie** neergezet: (a) de "RF2O heeft ~2/3 yaw-fout"-aanname waar het voorstel op steunt is door onze eigen schone tests achterhaald (rf2o zelf is 0,97-1,02× nauwkeurig bij gladde beweging, en Pad A haalt nu al 0,96-1,00×), (b) camera-SLAM is in dit project al eerder bewust losgelaten vanwege Pi/Jetson-rekenlast, (c) vanavond al tekenen van resource-druk gezien (DDS-transport-fouten, een onverklaarde container-herstart). Advies: eerst de goedkope, bijna-afgeronde lidar/IMU-route afmaken; dit voorstel als fallback bewaren als oriëntatie dan nog steeds onbetrouwbaar blijkt.
+- **Zijwaartse drift tijdens recht-vooruit-lopen** — ongewijzigd t.o.v. 11 augustus, nog niet herzien.
+- **Pad B (zachte gait-variant)** — on hold, ongewijzigd.
+- **Astra Pro Plus + ICP-pointcloud-odometrie** — on hold als stap-2-fallback, ongewijzigd. Zie ook de nieuwe externe-IMU-linksom-onbetrouwbaarheid hierboven als extra argument om dit soms te herzien als de externe IMU problematisch blijft.
 
 ---
 
-## Belangrijke, blijvende lessen uit deze sessie
+## Belangrijke, blijvende lessen uit deze sessie (14 augustus 2026)
 
-- **Nooit een lange, blinde rotatieduur commanderen** op basis van een niet-voor-die-richting/dat-moment-gevalideerde snelheid — altijd korte, veilige stappen met een echte tussenmeting. Dit gebeurde twee keer vanavond ondanks eerder geleerde lessen.
-- **Wachttijden altijd met `time.sleep()`**, nooit een `spin_once`-lus met een per-iteratie-timeout — die garandeert geen echte verstreken tijd.
-- **Minimaal ~24-27 seconden wachten na elke stop** voordat een yaw/pose-meting betrouwbaar is (fysieke naslinger, empirisch bepaald).
-- **IMU-plaatsing t.o.v. metalen delen is een reële foutbron**, niet alleen een theoretisch punt — vlak bij metaal gaf aantoonbaar inconsistente, zelfs tekenwisselende metingen.
-- Bij een hardnekkig, herkenbaar probleem: **doorzoek oudere sessie-transcripten** (`~/.claude/projects/-home-pi/*.jsonl`, `mcp__ccd_session_mgmt__search_session_transcripts` bleek de index niet goed te dekken, dus desnoods direct grepen in de `.jsonl`-bestanden) — dit project heeft een lange geschiedenis en problemen zijn vaker al eens opgelost.
+- **Rotatie-only lokalisatie is onvoldoende, zelfs met een volledige 2-cirkel-spin** — gebruik een gecombineerde (x,y,yaw) grid-search-scanmatch i.p.v. AMCL's eigen particle filter blind te vertrouwen op deze kaart. Zie PROBLEMS.md voor de volledige procedure.
+- **180°-voor/achter-ambiguïteit in scan-matching komt vaker voor dan gedacht** — niet alleen lange gangen, ook een relatief kleine, min-of-meer symmetrische kamer gaf een scan-match die 180° verkeerd om was. Los dit NOOIT op door de aan AMCL doorgegeven pose te flippen — corrigeer alleen de weergave (zie `FRONT_DISPLAY_OFFSET_DEG` in `lidar_overlay.py`).
+- **Plaatjes/schetsen laten interpreteren voor precieze hoeken is foutgevoelig** — meerdere keren deze sessie verkeerd afgelezen (zowel door de assistent als in de communicatie erover). Objectieve scan-matching (grid-search) is betrouwbaarder dan visuele educated guesses, maar zelfs dan is een laatste menselijke bevestiging nodig bij 180°-symmetrie.
+- **Eén sensor onafhankelijk cross-checken tegen een andere kan een sensorprobleem isoleren** — de linksom-kalibratie-inconsistentie bleek specifiek aan de externe IMU te liggen, niet aan de robot/gait, doordat dezelfde test tegen de STM32-onboard-IMU wél consistent was.
+- (Blijft gelden, uit eerdere sessies) **Nooit een lange, blinde rotatieduur commanderen** op basis van een niet-gevalideerde snelheid; **wachttijden altijd met `time.sleep()`**; **minimaal ~24-27 seconden wachten na elke stop** voor een betrouwbare yaw/pose-meting.
