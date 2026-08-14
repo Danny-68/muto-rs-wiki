@@ -5,6 +5,12 @@
 
 ---
 
+## 🔄 Nieuwe sessie? Lees eerst [OVERDRACHT.md](OVERDRACHT.md)
+
+Bevat de actuele status, directe vervolgstappen en openstaande bugs — bijgewerkt na elke sessie.
+
+---
+
 ## 📋 Inhoudsopgave
 
 | Document | Inhoud |
