@@ -4,6 +4,67 @@ Overkoepelend statusoverzicht van de grote visie: een volledig autonome, natuurl
 
 ---
 
+## ✅ Nav2-hertest 15 augustus 2026 (nacht) — twee echte bugs gevonden (LiDAR-driver, verify-script), lokalisatie bleek steeds goed
+
+Vervolg op de reflectiesectie hierboven, zelfde dag. Doel: nu de externe-IMU-rotatiebug is opgelost, de open 14-augustus-`NavigateToPose`-bug opnieuw testen.
+
+### Setup
+Volledige stack: LiDAR + robot_state_publisher + rf2o + imu_publisher (gekalibreerd) + EKF (Pad A) + `phoenix_driver.py` + Nav2 (`hexapod_navigation.launch.py`), met kaart-override naar de bewezen `lidar_only_map.yaml` (het launch-bestand wees standaard naar een andere, ongebruikte voorbeeldkaart).
+
+**Bugfix vooraf:** `hexapod_nav_params.yaml` had `odom_topic: odom` (rauwe RF2O) bij `bt_navigator`, en `controller_server` had helemaal geen `odom_topic` (dus Nav2's default, ook `odom`) — beide gecorrigeerd naar `odom_fused`. Geverifieerd via `ros2 node info /controller_server`: nu correct geabonneerd op `/odom_fused`.
+
+### Poging 1: mislukt, robot bewoog richting muur
+Eerste `NavigateToPose`-test (0,5m rechtdoor via `guarded_navigate_test.py`) eindigde met de robot richting een muur. **Geen schade** (fysieke zelfbescherming van de servo's greep in). Log toonde de oorzaak direct:
+```
+Starting point in lethal space! Cannot create feasible plan.
+```
+Root cause: `inflation_radius: 1.0` (1 meter) tegenover `robot_radius: 0.25` — in een kleine kamer valt daarmee bijna elke positie binnen ~1m van een muur al in verboden gebied. De costmap kon niet plannen, Nav2's recovery-gedrag (spin → wait → **backup**) sloeg aan, en de blinde `backup`-beweging (geen geldig pad, DriveOnHeading) is vermoedelijk wat de robot richting de muur stuurde — niet een navigatiefout in de eigenlijke besturing.
+
+**Fix:** `inflation_radius` verlaagd naar 0,35 (dynamisch via `ros2 param set` én persistent in `hexapod_nav_params.yaml`, met backup `.bak_20260815_inflationfix`).
+
+### AMCL-herlokalisatie: globale lokalisatie + gecombineerde rotatie+translatie
+Standaard rotatie-alleen-convergentie leek te werken (covariantie daalde van 70/406 naar 0,10-0,15) maar de gebruiker vroeg terecht om extra zekerheid via `verify_amcl_pose.py` (objectieve raycast-vergelijking op 0/90/180/270°, i.p.v. alleen covariantie/visuele overlay vertrouwen).
+
+### Bug 1 gevonden: LiDAR-driver vult onbeantwoorde hoeken met 0,0m i.p.v. ongeldig
+Eerste `verify_amcl_pose.py`-run gaf grote afwijkingen op 3 van de 4 richtingen, met 90° exact op 0,00m in twee onafhankelijke metingen (verschillende robot-oriëntaties) — een aanwijzing dat dit geen lokalisatiefout was maar sensor-gerelateerd. Een polaire plot van de volledige scan bevestigde dit dramatisch: **678 van 2020 punten (33,5%)** stonden op precies 0,0m, geconcentreerd in een brede waaier rechtdoor-tot-rechts. Gebruiker bevestigde fysiek: geen blokkade van de LiDAR.
+
+**Root cause gevonden in `ydlidar_ros2_driver_node.cpp`:**
+```cpp
+scan_msg->ranges.resize(size);  // C++ default: nieuwe elementen = 0.0f
+...
+if (scan.points[i].range >= scan.config.min_range) {
+    scan_msg->ranges[index] = scan.points[i].range;  // alleen HIER overschreven
+}
+```
+Hoek-bins die geen enkel punt van de LiDAR kregen (bijv. bij een lange, open zichtlijn de gang in — YDLIDAR TG30-datasheet: bereik 0,10-30m bij 80% reflectiviteit, minder bij lagere reflectiviteit/grotere afstand) bleven op hun resize-default staan: 0,0m, ononderscheidbaar van een echte meting.
+
+**Fix:** `scan_msg->ranges.resize(size, std::numeric_limits<float>::quiet_NaN())`, herbouwd met `colcon build --packages-select ydlidar_ros2_driver` (12,4s, geen fouten). Geverifieerd: 0 valse nulpunten, 123 correct als `nan` gemarkeerd (~6%, normaal). Backup: `ydlidar_ros2_driver_node.cpp.bak_20260815_zerofillfix`.
+
+**⚠️ Vier bijna-identieke kopieën van deze driver-broncode ontdekt** in verschillende workspace-mappen (`yahboomcar_ros2_ws/src/`, `software/src/`, `software/library_ws/src/`, `software/library_ws_humble/src/`) — alleen de laatste wordt daadwerkelijk geladen (via het `$L`-pad in de opstartscripts), de andere drie zijn ongebruikt en dateren van vóór de actieve debug-geschiedenis (nov/dec 2025). **Nog geen besluit genomen** of deze verwijderd worden of alleen gemarkeerd als niet-gebruikt — open punt voor volgende sessie.
+
+### Bug 2 gevonden: `verify_amcl_pose.py` had zelf geen 180°-correctie voor de LiDAR-montage
+Na de driver-fix bleven 0°/180°/270° nog steeds fors afwijken (1,99-2,26m) — dus niet verklaard door bug 1. Gebruiker beoordeelde de LiDAR-overlay-tekening visueel als "klopt vrijwel, kleine drift" — een duidelijke tegenspraak met de grote numerieke afwijkingen. Dat bleek terecht: `lidar_overlay.py` corrigeert netjes voor de 180°-gedraaide LiDAR-montage (`STATIC_YAW = π`, bevestigd via `tf2_echo base_link laser_scan_fix`) vóórdat scanpunten naar de kaart getransformeerd worden. **`verify_amcl_pose.py` deed dat niet** — hij las de ruwe scan-array direct af alsof sensor-hoek 0° de voorkant van de robot is, terwijl dat door de gedraaide montage de achterkant is.
+
+**Fix:** `scan_range_at(rel_deg - 180, ...)` i.p.v. `scan_range_at(rel_deg, ...)`.
+
+**Resultaat na beide fixes:**
+
+| Hoek | Laser | Raycast | Verschil |
+|---|---|---|---|
+| 0° | geen (ongeldig punt) | 3,75m | n.v.t. |
+| 90° | 2,90m | 2,00m | +0,90m |
+| 180° | 1,76m | 1,65m | **+0,11m** |
+| 270° | 0,82m | 0,65m | **+0,17m** |
+
+Twee van de drie bruikbare metingen nu klein en normaal — de lokalisatie was dus steeds prima, de eigen visuele inschatting van de gebruiker klopte, het verificatiescript loog.
+
+### Openstaande punten
+1. **Cleanup-besluit ongebruikte driver-kopieën** (3 stuks) — documenteren als niet-gebruikt, of verwijderen? Nog niet beslist.
+2. **Nieuwe `NavigateToPose`-poging nog niet gedaan** na alle fixes van vanavond (inflation_radius, odom_topic, LiDAR-driver, verify-script) — dat is de logische volgende stap voor een volgende sessie.
+3. De oorspronkelijke 14-augustus-`NavigateToPose`-bug (30cm werd >50cm) is nog steeds niet apart gereproduceerd/bevestigd-opgelost — de vanavond gevonden `inflation_radius`-bug is een sterke kandidaat-verklaring, maar niet 1-op-1 bevestigd tegen die specifieke oude sessie.
+
+---
+
 ## 🎯 Planningssessie 15 augustus 2026 — IMU-taakverdeling, stop-and-correct-navigatie, afstandskalibratie (nog niet getest)
 
 **Pure planningssessie, geen hardware aangeraakt.** Doorgesproken op basis van deze wiki plus de codebase; hieronder de conclusies en het vervolgplan. Bouwt voort op Pad A hieronder (11 aug) en de AMCL-grid-search-procedure (14 aug, zie PROBLEMS.md) — vervangt die niet.
