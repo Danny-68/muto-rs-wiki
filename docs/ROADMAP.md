@@ -42,6 +42,97 @@ Zie OVERDRACHT.md "Direct te doen" voor de genummerde, uitvoerbare volgorde (beg
 
 ---
 
+## ✅ Uitvoering 15 augustus 2026 — karakteriseringstests gedraaid, MAG_GAIN-rotatiebug gevonden
+
+Vervolg op de planningssessie hierboven, zelfde dag. Externe IMU is door de gebruiker opnieuw aangesloten (in de verhoogde/geïsoleerde positie van 11 aug); `imu_publisher.py` los getest, geen magnetometer-timeout meer, `/imu` stabiel op 20Hz. `ekf_params.yaml` (Pad A) bleek in de container al onveranderd correct te staan (RF2O x/y, extern IMU yaw, STM32-yaw uit) — het losse `ekf_params_stm32_yaw.yaml`-bestand van 14 aug staat er nog maar wordt door niets meer aangeroepen.
+
+**Nieuw testscript:** [`combi_calibration_test.py`](../../../combi_calibration_test.py) (host: `/home/pi/`, container: `/root/`) — combineert `phoenix_yaw_drift_test.py`'s meetlint-/yaw-logpatroon met continue `/imu`+`/odom`-logging via een losse `rclpy`-node, geïnterleaved met de 50Hz-gaitloop (non-blocking `spin_once`). Vereist LiDAR+robot_state_publisher+rf2o+imu_publisher draaiend, NIET phoenix_driver.py/ekf_node (zelfde exclusieve-serial-poort-reden als het bestaande testscript). Fases: `stationary`, `stm32_hz`, `forward` (met `--direction`), `rotate_inplace` (met `--rotate-direction`), `combined` (met `--pattern` van F/L/R/U-stappen).
+
+### Stationary-fase (IMU-ruisband in rust, geen beweging)
+| Kanaal | Min | Max | Gem. |
+|---|---|---|---|
+| roll_deg | -1,642 | -1,512 | -1,567 |
+| pitch_deg | -0,019 | 0,503 | 0,400 |
+| gyro_z_dps | -0,417 | 0,285 | -0,060 |
+| accel_mag_mps2 | 10,245 | 10,379 | 10,310 |
+
+Twee dingen: (1) roll/pitch hebben een kleine **statische offset** (montagehoek, geen ruis rond 0) — toekomstige noodstop-drempels moeten hier relatief aan zijn. (2) `accel_mag` ligt structureel op **~10,31 m/s², niet 9,81** — vermoedelijk een ongekalibreerde schaalfactor in `imu_publisher.py` (geen accel-kalibratie in de code). Ook hier: drempels relatief aan 10,31, niet aan de natuurkundige 9,81.
+
+**Scriptbug gevonden en gefixt tijdens deze fase:** de eerste ~10ms na elke buffer-reset gaf een opstart-transiënt (17,14 i.p.v. ~10,3 m/s²) — `SensorLogger.noise_band()` slaat nu de eerste 0,2s na een reset over.
+
+### STM32-Hz-bus-contentie (continu pollen tijdens actieve gait, op verschillende rates)
+Reproduceert/actualiseert de "10Hz breekt de gait"-bevinding uit `phoenix_driver.py` op de huidige (post-`fix_foot_delta`/post-`deepen_splay`) gait. **Meetprincipe:** `iface._ser` is dezelfde seriële poort als de servo-commando's, dus een STM32-read verdringt letterlijk het eerstvolgende servo-commando — meetbaar als extra wall-clock-tijd t.o.v. de verwachte duur (`steps_needed * dt`).
+
+**Eerste run had een timing-bug** (`next_poll += interval_s` i.p.v. relatief aan nu) die bij 5Hz/10Hz op hol sloeg (poll-op-elke-stap zodra een read langer duurde dan het interval) — wall-tijd liep op tot 104-107s i.p.v. de verwachte 8,5s. Gefixt (`next_poll = time.monotonic() + interval_s`) en herhaald:
+
+| Rate | Wall-tijd | Verwacht | Overhead | STM32-reads | Werkelijke rate |
+|---|---|---|---|---|---|
+| 0Hz (baseline) | 11,58s | 8,48s | +36,6% | 0 | — |
+| 2Hz (huidige productie) | 15,92s | 8,48s | **+87,8%** | 22 | ~1,38Hz |
+| 5Hz | 22,54s | 8,48s | +165,8% | 53 | ~2,35Hz |
+| 10Hz | 31,36s | 8,48s | +269,8% | 105 | ~3,35Hz |
+
+**Conclusie: nee, 2Hz is niet "voldoende zonder hinder"** (dat stond nog als open vraag in `phoenix_driver.py`'s comment) — het is alleen minder erg dan hogere rates. Overhead schaalt ~lineair met de gevraagde rate; de werkelijk haalbare rate plafonneert rond ~3,4Hz (harde seriële-protocol-beperking, niet oplosbaar door hoger te vragen). Zelfs de 0Hz-baseline heeft al +36,6% overhead puur door de Python/rclpy-loop zelf.
+
+### Afstandskalibratie vooruit/achteruit
+2 reps continu (geen reset ertussen, dus gemeten als 1 doorlopende meting van 10,6 cycli):
+
+| Richting | Meetlint totaal | cm/cyclus | RF2O totaal | RF2O-ratio |
+|---|---|---|---|---|
+| Vooruit | 101,0cm | 9,53 | 94,9cm | 0,940 |
+| Achteruit | 102,5cm | 9,67 | 95,5cm | 0,932 |
+| **Gemiddeld** | | **9,60** | | **0,936** |
+
+- **`MAX_LINEAR_SPEED_MPS` in `phoenix_driver.py` blijft bevestigd geldig**: 9,60cm/cyclus ÷ 1,6s ≈ 0,0600 m/s tegenover de huidige 0,0594 m/s — binnen meetruis, ondanks de twee gait-wijzigingen sindsdien. Geen update nodig.
+- **Belangrijk scoping-punt:** dit kalibreert `phoenix_driver.py`'s cycle-gebaseerde constante (het pad dat Nav2 gebruikt), NIET `robot_bridge.py`'s `SPEED_TABLE` (STM32-firmware-gait via `muto_driver_fixed.py`, een ander bewegingsmechanisme, gebruikt door de Dify/spraak/HTTP-commando's). Die laatste kalibratie is dus nog steeds niet vernieuwd.
+- **Nieuwe bevinding: RF2O onderschat x/y consistent ~6-7% in beide richtingen** (0,940 en 0,932, niet toevallig verschillend) — eerste concrete data op de eerder openstaande vraag "is RF2O x/y betrouwbaar tijdens gait" (was 🟡). Consistente richtingsonafhankelijke onderschatting, geen teken-wisselende fout zoals bij yaw — zou in principe met een vaste factor te corrigeren zijn (in tegenstelling tot yaw). Nog n=2, dus voorlopig signaal.
+
+### Rotate_inplace — belangrijke bevinding: externe IMU onbetrouwbaar bij actieve rotatie, in BEIDE richtingen (niet alleen linksom zoals eerder gedacht)
+
+**Scriptbug gevonden en gefixt tijdens deze fase:** yaw-delta-berekeningen (`stm32_drift_deg`, `ext_drift_deg`) deden een kale aftrekking zonder rekening te houden met de ±180°-wrap van de yaw-representatie — gaf een keer -304,98° i.p.v. de werkelijke +55,02°. Nieuwe `wrap_deg()`-helper toegevoegd, overal toegepast.
+
+Na de fix, met de originele `MAG_GAIN=0,01`:
+
+| | STM32 | RF2O (geïmpliceerd) | Externe IMU |
+|---|---|---|---|
+| Links rep1 | +54,47° | — | +24,58° (te klein) |
+| Links rep2 | +55,02° | +55,19° | **-42,03° (verkeerd teken)** |
+| Rechts rep1 | -55,94° | — | **+15,0° (verkeerd teken)** |
+| Rechts rep2 | -55,87° | -55,96° | **+26,3° (verkeerd teken)** |
+
+STM32 en RF2O zijn onderling zeer consistent (~55-56° per rep, RF2O binnen 0,2° van STM32) in beide richtingen — beide te vertrouwen voor rotatie. De externe IMU is structureel fout, **niet alleen linksom** zoals de 14-augustus-overdracht suggereerde — hier is rechtsom zelfs slechter (beide reps verkeerd teken, tegenover 1-van-2 bij links).
+
+**Root cause gevonden (voorlopig, workaround bevestigd):** `imu_publisher.py` gebruikt `MAG_GAIN=0.01` (magnetometer-correctie), met een in de eigen docstring al gevlagde, nooit-geverifieerde as-remap tussen het magnetometer- en accel/gyro-die. Met `MAG_GAIN=0.0` (zuivere gyro-integratie, magnetometer-bijdrage uitgeschakeld) herhaald:
+
+| | STM32 | Extern (MAG_GAIN=0) | Verschil |
+|---|---|---|---|
+| Links | +55,86° | +57,20° | 1,3° (~2,4%) |
+| Rechts | -58,08° | -58,33° | 0,3° (~0,4%) |
+
+Beide richtingen nu consistent. **Belangrijke nuance (gebruiker checkte dit expliciet):** de externe IMU zat al in de verhoogde/geïsoleerde positie van 11 augustus (niet vlak bij het metalen frame) — dus dit is waarschijnlijk niet dezelfde fysieke-interferentie-oorzaak van toen, eerder een echte softwarebug in de magnetometer-fusie. Niet 100% zeker; beide hypotheses (as-remap-bug vs. toch nog resterende fysieke interferentie) blijven open tot verder onderzocht.
+
+**⚠️ `MAG_GAIN=0.0` is bewust een workaround, geen fix, en blijft zo staan** (besluit gebruiker, 15 aug). Backup van de originele waarde: `imu_publisher.py.bak_20260815_maggaintest` (host én container). **Consequentie: langetermijn-yaw-drift-risico is heropend** — zonder magnetometer-correctie is er geen absolute-heading-referentie meer, puur gyro-integratie zal over langere missies wegdrijven (dit was het allereerste punt van de hele 15-augustus-sessie, nu weer relevant). Root-cause-onderzoek (as-remap verifiëren tegen het ICM20948-datasheet, Figuur 12/13) staat open voor een latere sessie.
+
+### Combined-test (F→U→F→L: vooruit, 180°-draai, vooruit, kleine draai) — bevestigt de fix houdt stand
+Nieuw, flexibel patroon-systeem toegevoegd aan `phase_combined` (was: alleen afwisselend vooruit/altijd-linksom, liep bij elk segment verder van start af). Nu: `--pattern` van F/L/R/U-stappen, `U` = 180° (17,1 cycli, afgeleid van de rotatiemeting hierboven).
+
+| Bron | Gemeten delta | 
+|---|---|
+| STM32 | -124,2° |
+| Externe IMU (MAG_GAIN=0) | -123,7° |
+| RF2O | -127,6° |
+
+Verwacht (180°+55° links, gewrapt): -125°. Alle drie binnen ~4° van elkaar en van de verwachting, óók door een complexere manoeuvre heen (niet alleen een geïsoleerde rotatie) — goede extra bevestiging dat de `MAG_GAIN=0`-workaround robuust is, geen toevalstreffer. Ruisband tijdens actieve gait ook gelogd (`accel_mag` 8,92-12,19 m/s², gem. 10,31 — gelijk aan de stilstand-baseline maar bredere spreiding; `gyro_z` -24,9 tot +15,8°/s) — bruikbaar voor de eerder besproken noodstop-drempel-discussie.
+
+### Openstaande punten na deze sessie
+1. **As-remap-root-cause nog niet gevonden** — alleen omzeild via `MAG_GAIN=0`.
+2. **`robot_bridge.py`'s `SPEED_TABLE`/`STEP_DISTANCE_M`** — nog steeds niet vernieuwd (ander bewegingspad dan wat vandaag gekalibreerd is, zie scoping-punt hierboven).
+3. **STM32-Hz-overhead blijft bestaan zelfs bij 2Hz** (+87,8%) — geen actie ondernomen, alleen gekwantificeerd.
+4. **Kleine steekproeven overal** (n=1-2 per conditie) — sterke, consistente signalen, maar nog geen robuuste kalibratie.
+5. De residual-gate-node (A hierboven) en de stop-and-correct-navigatielus (C hierboven) zijn nog niet gebouwd — deze sessie leverde alleen de karakteriseringsdata die daarvoor nodig was.
+
+---
+
 ## 🎯 Puntenlijst voor de volgende sessie (bijgewerkt 11 augustus 2026, avond)
 
 Deze sessie liep aan het eind te veel tests en aannames door elkaar (rf2o-onderzoek, Pad A/B/C, stopsequentie-experimenten, Nav2-poging, open-loop-vooruit-tests) — dit is de ontwarde, één-voor-één-lijst om vanaf te werken. **Niet meerdere punten tegelijk aanpakken.**
