@@ -4,6 +4,75 @@ Overkoepelend statusoverzicht van de grote visie: een volledig autonome, natuurl
 
 ---
 
+## ⚠️ Vervolg 15 augustus 2026 (diep in de nacht) — eerste geslaagde NavigateToPose, daarna een aanhoudend AMCL-betrouwbaarheidsprobleem, sessie geëindigd door een vastgelopen Muto + reboot
+
+Direct vervolg op de sectie hieronder (die eindigde met lokalisatie bevestigd goed, 0,11-0,17m afwijking, klaar voor een nieuwe `NavigateToPose`-poging). Dit werd een lange, leerzame maar uiteindelijk onopgeloste zoektocht. Alles hieronder in chronologische volgorde.
+
+### Cleanup en eerste succesvolle test
+- De 3 ongebruikte LiDAR-driver-kopieën gearchiveerd (niet verwijderd): `/root/_archive_20260815_unused_ydlidar_copies.tar.gz` (5MB), verwijderd uit de actieve workspace na bevestiging dat er nergens naar verwezen werd.
+- **Eerste geslaagde `NavigateToPose` van het hele project** (0,5m rechtdoor via `guarded_navigate_test.py`, status=4 SUCCEEDED) — een echte mijlpaal, al bleek de nasleep problematisch (zie hieronder).
+
+### Belangrijke procesfeedback van de gebruiker (nu staand beleid)
+Na de geslaagde test bewoog de robot zonder dat expliciet om ruimte/toestemming was gevraagd voor dát specifieke moment (een eerdere algemene "ja, laten we het proberen" was ten onrechte als doorlopende toestemming behandeld). Drie regels vanaf nu:
+1. **Altijd expliciet vragen om ruimte-bevestiging vlak vóór een bewegingscommando** — nooit een eerdere algemene instemming als geldig beschouwen voor een volgende, aparte actie.
+2. **De gebruiker bepaalt altijd zelf het navigatiedoel/de locatie** — niet zelf een "veilig" doel kiezen (zoals eerder "0,5m rechtdoor").
+3. **Na elke test eerst de positie-tekening (kaart + LiDAR-overlay) tonen** voor visuele beoordeling door de gebruiker, vóórdat een volgende stap gezet wordt.
+
+### Bevinding: STM32-onboard-yaw is onbetrouwbaar na langere/complexere (Nav2-aangestuurde) beweging
+Na de geslaagde navigatietest gaven STM32, externe IMU en AMCL **alle drie een andere yaw**. De gebruiker keek fysiek naar de robot: ~-160°, wat het dichtst bij de **externe IMU** lag (-164,8°), niet bij STM32 (-136,2°, ~24° fout) of AMCL (-113,4°, ~47° fout). Een tweede, verse STM32-meting bleef stabiel fout (-136,5°) — geen tijdelijke leesfout, een **aanhoudende drift**.
+
+**Verklaring:** STM32-onboard-yaw is pure gyro-integratie, zonder magnetometer-correctie (die zit alleen op de externe IMU, sinds vandaag gekalibreerd). Bij de korte, geïsoleerde testbewegingen van eerder vandaag (`combi_calibration_test.py`) bleef dat binnen 0,1-2% nauwkeurig. Bij deze langere, door Nav2/DWB aangestuurde beweging (nooit eerder op deze manier getest) bouwde STM32 kennelijk meer fout op, zonder enig correctiemechanisme om dat te herstellen.
+
+**Consequentie voor een volgende sessie: STM32-yaw niet meer vertrouwen als referentie voor iets anders dan korte, geïsoleerde testbewegingen.** Voor alles wat met echte Nav2-navigatie te maken heeft, is de externe IMU (via EKF/`odom_fused`) de betrouwbaardere bron — bevestigd doordat EKF/`odom_fused` en de externe IMU de hele nacht, bij elke kruischeck, binnen ~0,2° van elkaar bleven, ook wanneer AMCL er ver naast zat.
+
+### AMCL: eerst bevroren, daarna herhaaldelijk verkeerd geconvergeerd
+- **Bevroren:** `/amcl_pose` bleek 14,5 minuut oud (874s) — niet actief aan het bijwerken, ondanks dat de robot bewogen had. `ros2 topic hz /amcl_pose` gaf geen enkele update. AMCL's lifecycle-status was wel "active" (niet gecrasht, gewoon vastgelopen). In de log stond een **onverklaarde tweede `createLaserObject`-gebeurtenis** halverwege de sessie (normaal maar één keer, bij opstarten).
+- Volledige Nav2-stack herstart (nav2_container gekilld + opnieuw gelaunched) → verse globale lokalisatie + de bewezen rotatie+verplaatsing-sequentie → **ditmaal niet bevroren, maar ~56° verkeerd geconvergeerd** (vergeleken met de betrouwbare EKF/externe-IMU-consensus).
+- Handmatige correctie geprobeerd: alleen de yaw gecorrigeerd via een verse `/initialpose` (AMCL's eigen x/y behouden, yaw vervangen door de EKF-waarde) — **bleef visueel en numeriek slecht**, vermoedelijk omdat de x/y zelf ook al niet meer klopte uit de foute convergentie. De gebruiker wees er terecht op dat dit een **cascade van verslechtering** was: elke volgende actie bouwde voort op een mogelijk al foute staat, in plaats van schoon te herstarten.
+- **Poging om terug te gaan naar de "spot on"-coördinaten mislukte begrijpelijk** — de robot had intussen fysiek meerdere keren bewogen (de navigatietest + twee rotatie+verplaatsing-sequenties), dus de oude coördinaten klopten niet meer met de werkelijke locatie. Visuele overlay bevestigde een duidelijke verschuiving.
+
+### Twee echte weesprocessen gevonden (mogelijke (mede)oorzaak van de AMCL-problemen)
+Op verzoek van de gebruiker ("wat is er in de *setup* anders, niet de coördinaten") bleek:
+1. **Een 90 minuten oud, wees `ros2 launch ydlidar_ros2_driver`-proces** (bash-wrapper + python-launch-proces) — ontstaan doordat de eerdere driver-herstart (voor de zero-fill-bugfix) alleen `pkill -f ydlidar_ros2_driver_node` deed, wat wél het eigenlijke driver-proces killde maar **niet** de bovenliggende `ros2 launch`-wrapper. Die bleef 90 minuten in de leegte draaien, precies rond het moment waarop de mysterieuze tweede `createLaserObject`-gebeurtenis plaatsvond.
+2. **Een 103 minuten oude, wees `static_transform_publisher`** (`base_link → laser_frame`) — zelfde oorzaak, uit de allereerste LiDAR-launch van de avond, nooit gestopt. Publiceerde **dezelfde waarden** als het huidige proces, dus twee onafhankelijke nodes die identieke statische TF-data naar `/tf_static` stuurden — een TF-dubbelzinnigheid die aanwezig was tijdens **alle** relokalisatiepogingen na de eerste (goede).
+
+Beide grondig opgeruimd (expliciete PID-kills, niet patroon-gebaseerde `pkill`, om herhaling te voorkomen). Volledige procesaudit + topic-publisher-telling uitgevoerd op de rest van de stack: verder alles schoon (`/cmd_vel`'s 5 publishers bleken normale Nav2-architectuur — 4x `behavior_server`-recovery-plugins + 1x `velocity_smoother`, geen bug).
+
+**Belangrijke, nog openstaande vraag: na het opruimen van beide weesprocessen mislukte een verse relokalisatiepoging opnieuw** (~61° fout t.o.v. de EKF/externe-IMU-consensus) — dus de weesprocessen waren hoogstwaarschijnlijk een reëel probleem en terecht opgeruimd, maar **niet de volledige verklaring**. Van de in totaal 3+ verse relokalisatiepogingen na het "spot on"-moment faalden er minstens 2 met een vergelijkbare foutgrootte (~56-61°) — dat wijst eerder op een structureel, herhaalbaar AMCL-probleem met deze specifieke (kleine, wat rommelige) kaart dan op toeval.
+
+### 180°-hypothese getest, maar op het verkeerde punt in de TF-boom
+De gebruiker vermoedde dat de kijkrichting + LiDAR-overprojectie 180° gedraaid moesten worden, softwarematig op te lossen. Getest door de `static_transform_publisher`'s rotatie (`base_link → laser_frame`) om te draaien naar 180°. **Geen enkel effect** op de daadwerkelijke `base_link → laser_scan_fix`-transformatie die AMCL/rf2o gebruiken.
+
+**Verklaring, ontdekt tijdens het testen:** `laser_frame` en `laser_scan_fix` zijn **twee losse, ongerelateerde takken** in de TF-boom, geen keten. `laser_frame` (van deze `static_transform_publisher`) wordt nergens door de lokalisatie-pijplijn gebruikt — een dood spoor. `laser_scan_fix` (waar `/scan`'s `frame_id` op staat, en dus wat AMCL/rf2o echt gebruiken) komt rechtstreeks uit de URDF via `robot_state_publisher`, via een aparte, niet via `laser_frame` lopende relatie.
+
+**Om de 180°-hypothese echt te testen zou de URDF zelf aangepast moeten worden** (de `laser_scan_fix_joint`-definitie), niet deze `static_transform_publisher`. **Nog niet gedaan** — bewust niet ongevraagd, gezien hoeveel er al misging met eerdere ingrepen vanavond.
+
+Wijziging netjes teruggedraaid (backup `.bak_20260815_180test` op beide kopieën van `ydlidar_launch.py`), transformatie geverifieerd terug naar de originele waarde (180°, translatie -0,032/0/0,184).
+
+### Einde van de sessie: Muto liep vast, gebruiker deed een reboot
+Tijdens het opzetten van een volgende relokalisatiepoging liep de verbinding vast (MCP-server-disconnect, achtergrondtaak zonder afrondingsstatus) — gelijktijdig meldde de gebruiker dat **de Muto zelf was vastgelopen** en een reboot had gedaan. Na de reboot: de container kwam leeg terug op (alleen het keep-alive-proces), niets van de stack draaide meer. **Alle bestandswijzigingen van vanavond bleven behouden** (LiDAR-driverpatch, `odom_topic`, `inflation_radius`, magnetometer-kalibratie — dit zijn bestanden, geen proces-state, dus reboot-bestendig). Sessie hier afgesloten op verzoek van de gebruiker.
+
+### Samengevat: wat werkt, wat niet, wat nog te doen
+**Bevestigd werkend:**
+- Externe IMU (gekalibreerd) + EKF: betrouwbaar, ook na echte Nav2-beweging.
+- `odom_topic`-fix, `inflation_radius`-fix, LiDAR-driver-zero-fill-fix: alle drie bevestigd correct en nog actief.
+- Een volledige `NavigateToPose` kan slagen (status=4) wanneer AMCL wél goed gelokaliseerd is.
+
+**Nog stuk / onbetrouwbaar:**
+- **AMCL-convergentie op deze kaart is niet betrouwbaar herhaalbaar** — dit is het belangrijkste openstaande probleem. Root cause niet volledig gevonden; twee echte weesprocessen zijn opgeruimd maar verklaren niet alles.
+- STM32-onboard-yaw niet meer gebruiken als referentie buiten korte, geïsoleerde tests.
+- De 180°-hypothese van de gebruiker is nog niet echt getest (vereist een URDF-wijziging, nog niet gedaan).
+- Onbekende oorzaak van het vastlopen van de Muto zelf aan het einde van de sessie — nog niet onderzocht.
+
+### Aanbevolen aanpak voor de volgende sessie
+1. Volledige stack fris opstarten (zie "Direct te doen" in OVERDRACHT.md).
+2. **Voordat er weer een relokalisatiepoging gedaan wordt:** overweeg of de AMCL/`hexapod_nav_params.yaml`-parameters (deeltjesaantal, `update_min_a/d`, `laser_max_range`, etc.) passend zijn voor deze kleine, rommelige kaart — dat is nog niet onderzocht, en gezien de herhaalde mis-convergentie een waarschijnlijker vervolgspoor dan nog een keer dezelfde procedure herhalen.
+3. Overweeg een schonere, minder rommelige kaart opnieuw op te nemen — de huidige `lidar_only_map.yaml` heeft zichtbare straal-artefacten die mogelijk bijdragen aan de convergentieproblemen.
+4. URDF-gebaseerde 180°-test (`laser_scan_fix_joint`) als aparte, geïsoleerde stap, niet vermengd met andere wijzigingen.
+5. Uitzoeken waarom de Muto vastliep aan het einde van de sessie.
+
+---
+
 ## ✅ Nav2-hertest 15 augustus 2026 (nacht) — twee echte bugs gevonden (LiDAR-driver, verify-script), lokalisatie bleek steeds goed
 
 Vervolg op de reflectiesectie hierboven, zelfde dag. Doel: nu de externe-IMU-rotatiebug is opgelost, de open 14-augustus-`NavigateToPose`-bug opnieuw testen.
