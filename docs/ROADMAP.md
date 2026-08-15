@@ -4,6 +4,44 @@ Overkoepelend statusoverzicht van de grote visie: een volledig autonome, natuurl
 
 ---
 
+## 🎯 Planningssessie 15 augustus 2026 — IMU-taakverdeling, stop-and-correct-navigatie, afstandskalibratie (nog niet getest)
+
+**Pure planningssessie, geen hardware aangeraakt.** Doorgesproken op basis van deze wiki plus de codebase; hieronder de conclusies en het vervolgplan. Bouwt voort op Pad A hieronder (11 aug) en de AMCL-grid-search-procedure (14 aug, zie PROBLEMS.md) — vervangt die niet.
+
+**⚠️ Reconciliatie nodig bij start volgende sessie:** dit hele overleg ging uit van `ekf_params.yaml` (Pad A, externe ICM20948 als primaire yaw) als actuele config. De 14-augustus-overdracht meldt echter dat de externe IMU die avond is losgekoppeld (magnetometer-timeout) en dat de EKF sindsdien op `ekf_params_stm32_yaw.yaml` draait. Niet geverifieerd of dit inmiddels hersteld is — zie OVERDRACHT.md punt 1.
+
+### A. Odometrie/EKF-architectuur
+- Bevestigd al geïmplementeerd (11 aug, zie hieronder): RF2O alleen x/y, geen yaw; externe IMU primaire yaw/vyaw; STM32-yaw (`imu1`) uit voor isolatietest.
+- **Nog onbewezen:** RF2O x/y-betrouwbaarheid specifiek tijdens gait (los van de al onderzochte yaw-vraag) — hier is nooit apart naar gekeken, alleen naar yaw.
+- **Nieuw idee, nog niet gebouwd:** residual-gate-node — vergelijk `gyro_z` (IMU) met RF2O's hoeksnelheid; bij grote afwijking RF2O's covariance in het doorgestuurde odom-bericht dynamisch ophogen i.p.v. RF2O hard aan/uit te zetten. `robot_localization` gebruikt de covariance uit het inkomende bericht zelf, dus dit is technisch direct haalbaar als een kleine tussenlaag-node. Pas zinvol ná bevestiging dat RF2O x/y inderdaad wisselend betrouwbaar is.
+- Magnetometer (AK09916 in de ICM20948): bewust nog niet fuseren — 18 busservo's met wisselende stroom per gaitfase kunnen gecorreleerde (niet middelbare) storing geven. Eerst los karakteriseren.
+
+### B. IMU-taakverdeling (onboard STM32 vs. externe ICM20948)
+- **Onboard STM32-IMU** → lokale closed-loop besturing (`rotate_to_angle()` in `robot_bridge.py`, pollt op 50Hz zonder gemelde problemen zolang er geen gelijktijdige gait-servocommando's over dezelfde seriële lijn lopen).
+- **Externe ICM20948** → bedoeld als primaire yaw/vyaw voor ROS2/EKF, aparte I²C-bus, geen bus-contentie met servobesturing.
+- Preciezere verklaring van het eerder gevonden "10Hz breekt de gait"-probleem (`phoenix_driver.py`, `STM32_IMU_HZ = 2`): het is niet de sensor die inherent problematisch is, het is **bus-contentie bij gelijktijdig pollen terwijl gait-servocommando's over dezelfde seriële lijn lopen**. Dat verklaart waarom `rotate_to_angle()`'s 50Hz-onboard-polling wél probleemloos werkt (geen gelijktijdige gait-stream).
+- Geen dubbele yaw-fusie in de EKF (al zo, zie A).
+- **Nieuw idee, goedkoop toe te voegen:** beide IMU-yaws (extern + onboard) naast elkaar loggen tijdens dezelfde gait, puur als plausibiliteitscheck/diagnose — geen fusie, wel een vroege waarschuwing als één van beide duidelijk afwijkt.
+
+### C. Stop-and-correct navigatie
+Idee: tijdens het lopen niet proberen continu perfecte odometrie te leveren, maar periodiek stoppen en de LiDAR/AMCL een absolute correctie laten geven — analoog aan de al bewezen aanpak dat losse metingen na voldoende stilstand (`/pose_settling`, ≥24s) veel betrouwbaarder zijn dan tijdens beweging.
+- Bouwstenen bestaan al: `/pose_settling`-topic (`phoenix_driver.py`) + `guarded_navigate_test.py` (wacht op settled → one-shot AMCL-poll, met workaround voor het latched-topic-probleem → stuurt één relatief `NavigateToPose`-doel).
+- **Nog te bouwen:** dit patroon omvormen tot een herhalende lus die de totale afstand in segmenten opknipt (bv. 50cm-1m) met een settle+AMCL-correctie tussen elk segment, i.p.v. de hele afstand in één Nav2-doel te laten afleggen.
+- **Open vraag:** de bewezen AMCL-procedure uit de 14-augustus-sessie (grid-search over x,y,yaw + visuele bevestiging) is een zware, meerdere-seconden-procedure. Een korte tussenstop van een paar honderd ms + één `/amcl_pose`-poll is veel lichter — nog niet aangetoond of dat voldoende betrouwbaar is voor een correctie, of dat de zwaardere procedure nodig blijft. Eerst empirisch checken (AMCL-pose+covariance loggen bij korte stops, vergelijken met de grid-search-referentie).
+- Segmentlengte tussen correcties is geen vrije keuze: die volgt uit hoeveel drift IMU+gait-dead-reckoning opbouwt over die afstand (zie D/E) plus AMCL's "capture range".
+- Noodrem (obstakel tijdens lopen) blijft functioneel gescheiden van deze correctielus, en moet — net als het bestaande e-stop-lesje — de STM32-seriële stop raken, niet alleen ROS `cmd_vel=0`.
+
+### D/E. Karakterisering + afstandskalibratie (gecombineerd uit te voeren)
+- **Bevinding (via bestandsdatums, niet aannames):** `SPEED_TABLE` in `robot_bridge.py` is gemeten **1 juli 2026**; alle `logs/forward_drift_test*.py`/`backward_drift_test.py`-runs zijn van **9 augustus**. Beide liggen vóór twee gait-wijzigingen die de effectieve staplengte plausibel beïnvloeden: `fix_foot_delta.py` (10 aug, herschrijft `_foot_delta()`-formule volledig) en `deepen_splay.py`/`find_deep_splay.py` (12 aug, dieper/vlakker beenstand-profiel). **De huidige afstandskalibratie dekt dus een gait-versie die niet meer bestaat.**
+- `STEP_DISTANCE_M = 0.10` (`robot_bridge.py`) heeft geen dateringscomment — vermoedelijk nooit empirisch bevestigd, apart meenemen.
+- Yahboom's officiële repo (`YahboomTechnology/Muto-RS`, GitHub) doorzocht: geen bruikbare gait/staplengte-broncode, alleen cursus-PDF's (`18.Robot chassis control/1.Hexapod gait and kinematics.pdf`). `phoenix_gait.py` is eigen code — geen externe referentiewaarden beschikbaar, alles moet zelf gemeten worden.
+- **Voorstel:** één combi-testscript (uitbreiding van `phoenix_yaw_drift_test.py`'s log-/meetlint-patroon + `forward_drift_test*.py`'s afstandsmeting) dat in dezelfde sessie afdekt: IMU-drift-karakterisering, RF2O-x/y-betrouwbaarheid, yaw-rate-residual-logging (voor A), én de afstandskalibratie zelf — inclusief een in-place-draai-variant zonder netto translatie, om vibratie-invloed te scheiden van de translatie+rotatie-combinatie.
+
+### Samengevat stappenplan
+Zie OVERDRACHT.md "Direct te doen" voor de genummerde, uitvoerbare volgorde (begint met het verifiëren van de externe-IMU-status).
+
+---
+
 ## 🎯 Puntenlijst voor de volgende sessie (bijgewerkt 11 augustus 2026, avond)
 
 Deze sessie liep aan het eind te veel tests en aannames door elkaar (rf2o-onderzoek, Pad A/B/C, stopsequentie-experimenten, Nav2-poging, open-loop-vooruit-tests) — dit is de ontwarde, één-voor-één-lijst om vanaf te werken. **Niet meerdere punten tegelijk aanpakken.**
