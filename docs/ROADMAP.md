@@ -194,6 +194,21 @@ Twee samenwerkende factoren, geen van beide alleen voldoende:
 
 De as-remap (het oorspronkelijke verdachte uit de docstring) bleek na verificatie tegen het officiële datasheet correct.
 
+### Reflectie: wat dit betekent voor het architectuurplan van de planningssessie (zelfde dag)
+
+Het plan uit de "🎯 Planningssessie"-sectie hierboven hoeft niet herzien te worden — het is grotendeels bevestigd. Puntsgewijs:
+
+**Sterker onderbouwd dan bij het opstellen van het plan:**
+- **Pad A (externe IMU primaire yaw)** — het uitgangspunt van de hele sessie werd tijdens het testen zelf tijdelijk twijfelachtig (de rotatiebug), maar is nu daadwerkelijk gevalideerd (0,1-2,1% afwijking, ook met magnetometer-correctie aan) i.p.v. alleen aangenomen.
+- **IMU-taakverdeling (extern=continue EKF, onboard=lokaal)** — de STM32-Hz-bus-contentie-meting (+87,8% overhead zelfs bij 2Hz) onderbouwt waarom, en de externe IMU is nu bewezen betrouwbaar genoeg om die rol volledig te dragen.
+- **Astra geparkeerd houden** — beide odometriebronnen zijn nu gekarakteriseerd en bruikbaar (RF2O met een correctiefactor); nog minder reden voor een extra sensor dan bij het opstellen van het plan.
+
+**Overbodig of minder urgent geworden:**
+- **De residual-gate-node (dynamische RF2O-covariance, plan-sectie A)** — dit idee ging uit van *wisselend* betrouwbare RF2O (soms goed, soms fout, vandaar een dynamische trust-gate). De meting laat i.p.v. daarvan een **consistente, richtingsonafhankelijke onderschatting van ~6-7%** zien — een stabiele bias, geen chaos. Dat vraagt om een simpele vaste schaalcorrectie (~1,068×), niet om het dynamische gate-mechanisme uit het oorspronkelijke plan.
+- **Stop-and-correct-navigatie (plan-sectie C), urgentie verlaagd, niet weggevallen** — deels gemotiveerd door twee onzekerheden (onbetrouwbare RF2O-translatie, yaw-drift zonder correctie) die nu allebei zijn ingeperkt: RF2O heeft een voorspelbare bias, en de magnetometer-correctie bindt de yaw-drift al continu. Periodiek absoluut corrigeren blijft goede praktijk voor lange missies, maar is niet meer de noodzakelijke vangnet van toen beide odometriebronnen nog onbetrouwbaar leken.
+
+**Nieuwe, goed gemotiveerde vervolgstap: Nav2 opnieuw testen.** De open bug van 14 augustus (`NavigateToPose` liep veel verder dan het doel, 30cm werd >50cm, 17 recoveries) is nooit verklaard. Nav2 laat de robot tijdens navigatie routinematig roteren om op het doel te richten — precies het scenario waarin de externe IMU tot vandaag kon falen (tot 75% fout, soms verkeerd teken). Als de EKF tijdens die test corrupte yaw kreeg tijdens zo'n rotatie, verklaart dat mogelijk het onvoorspelbare gedrag. Niet zeker, maar een plausibele kandidaat-oorzaak, nu voor het eerst testbaar met een gefixte yaw-bron. **Kanttekening:** de AMCL-initial-pose-valkuil (11 aug, een gok die in "lethal space" kan landen) is een losstaand, nog steeds geldig risico — eerst zorgvuldig via de bewezen procedure (`mark_amcl_pose.py`/grid-search) initialiseren, niet ervan uitgaan dat de IMU-fix ook dát oplost.
+
 ---
 
 ## 🎯 Puntenlijst voor de volgende sessie (bijgewerkt 11 augustus 2026, avond)
