@@ -125,11 +125,74 @@ Nieuw, flexibel patroon-systeem toegevoegd aan `phase_combined` (was: alleen afw
 Verwacht (180°+55° links, gewrapt): -125°. Alle drie binnen ~4° van elkaar en van de verwachting, óók door een complexere manoeuvre heen (niet alleen een geïsoleerde rotatie) — goede extra bevestiging dat de `MAG_GAIN=0`-workaround robuust is, geen toevalstreffer. Ruisband tijdens actieve gait ook gelogd (`accel_mag` 8,92-12,19 m/s², gem. 10,31 — gelijk aan de stilstand-baseline maar bredere spreiding; `gyro_z` -24,9 tot +15,8°/s) — bruikbaar voor de eerder besproken noodstop-drempel-discussie.
 
 ### Openstaande punten na deze sessie
-1. **As-remap-root-cause nog niet gevonden** — alleen omzeild via `MAG_GAIN=0`.
+1. ~~As-remap-root-cause nog niet gevonden~~ — ✅ **opgelost, zie sectie hieronder.** As-remap bleek correct; werkelijke oorzaak was hard-iron-afwijking + nabijheid voedingsbord.
 2. **`robot_bridge.py`'s `SPEED_TABLE`/`STEP_DISTANCE_M`** — nog steeds niet vernieuwd (ander bewegingspad dan wat vandaag gekalibreerd is, zie scoping-punt hierboven).
 3. **STM32-Hz-overhead blijft bestaan zelfs bij 2Hz** (+87,8%) — geen actie ondernomen, alleen gekwantificeerd.
 4. **Kleine steekproeven overal** (n=1-2 per conditie) — sterke, consistente signalen, maar nog geen robuuste kalibratie.
 5. De residual-gate-node (A hierboven) en de stop-and-correct-navigatielus (C hierboven) zijn nog niet gebouwd — deze sessie leverde alleen de karakteriseringsdata die daarvoor nodig was.
+
+---
+
+## ✅ Vervolg 15 augustus 2026 (avond) — as-remap-root-cause opgelost: fysieke plaatsing + magnetometer-kalibratie
+
+Zelfde dag, vervolg op de sectie hierboven. Doel: de `MAG_GAIN=0`-workaround vervangen door een echte fix, zodat de magnetometer-correctie (en daarmee de langetermijn-drift-correctie) weer aan kan.
+
+### Stap 1: as-remap geverifieerd tegen het officiële datasheet — bleek correct
+`ds-000189-icm-20948-v1.5.pdf` (TDK/InvenSense, via SparkFun-mirror gedownload) pagina 83, Figuur 12 (accel/gyro-assen) vs. Figuur 13 (magnetometer-assen) vergeleken met de remap in `imu_publisher.py` (`mx_b, my_b, mz_b = my, mx, -mz`). De Z-as-inversie is ondubbelzinnig bevestigd in de diagrammen; de X/Y-swap komt overeen met de veelgeciteerde community-standaardremap (ook gebruikt in SparkFun/Adafruit/InvenSense-eigen drivers). **Conclusie: de as-remap was nooit de bug.** Dit verschoof de verdenking naar de expliciet-niet-gedane hard-iron/soft-iron-kalibratie.
+
+### Stap 2: fysieke montage bleek dicht bij het voedingsbord — verplaatst, 3 iteraties
+Foto's van de montage lieten zien dat de ICM20948 op korte (deels metalen) afstandhouders zat, direct boven/naast het voedingsverdeelbord (elco's + XT30-connector, de plek met de grootste servo-stroomschommelingen) en dicht bij een servo. Dat is niet de "verhoogde/geïsoleerde" positie die de 11-augustus-overdracht beschreef.
+
+Drie posities getest (rotatietest links/rechts, `MAG_GAIN=0,01`, telkens tegen STM32 als referentie):
+
+| Positie | Links | Rechts |
+|---|---|---|
+| 1 — origineel, bij voedingsbord | 24,6°/-42,0° vs ~55° (verkeerd teken) | 15,0°/26,3° vs ~56° (verkeerd teken) |
+| 2 — verhoogd, kunststof afstandhouder | 37,4° vs 49,7° (-25%) | -57,6° vs -51,3° (+12%) |
+| 3 — nogmaals aangepast | 28,4° vs 46,2° (-38%) | -32,8° vs -50,2° (-35%) |
+
+Niet monotoon verbeterd, maar wel een verschuiving in foutpatroon: van chaotisch/teken-wisselend (positie 1, past bij **dynamische** stroom-afhankelijke interferentie) naar consistent-richtingsonafhankelijk (posities 2-3, past bij een **statische** hard-iron-afwijking). Dat wees erop dat verplaatsing de dynamische component grotendeels wegnam, en dat een kalibratie het overblijvende statische deel zou moeten oplossen.
+
+**Overwogen en verworpen alternatieve hypothese:** off-axis-montage (IMU niet op de rotatie-as) zou via centripetale/tangentiële versnelling de accel-gebaseerde roll/pitch-schatting kunnen verstoren, en zo indirect de yaw via de tilt-gecompenseerde magnetometer-heading. Berekend met gemeten hoeksnelheid (~6-10°/s) en geschatte montage-afstand (~4cm): centripetaal ≈0,001 m/s², tangentieel ≈0,07 m/s² — beide verwaarloosbaar t.o.v. de gemeten ruisband (±0,1-1,6 m/s²) en identiek aan roll/pitch-ruis die ook tijdens gewoon vooruit lopen optreedt (geen rotatie-specifieke signatuur). Fysiek plausibel punt, maar bij dit tempo/deze afstand niet de verklaring.
+
+### Stap 3: hard-iron/soft-iron-kalibratie
+Nieuw script [`mag_calibration.py`](../../../mag_calibration.py) (host `/home/pi/`, container `/root/`): 2 volle rotaties, ruwe magnetometer-x/y/z gelogd (5459 samples), min-max-kalibratie (niet een volledige ellipsoïde-fit — de robot draait vooral om de yaw-as, dus roll/pitch-variatie is te beperkt voor een goed geconditioneerde 3D-fit).
+
+**Bevinding tijdens het draaien:** het script liep >2x langzamer dan verwacht (240s+ i.p.v. ~110s) — `ICM20948.read_magnetometer_data(timeout=1.0)` moet kennelijk regelmatig wachten tot een nieuwe sample klaar is, vergelijkbaar mechanisme als de STM32-Hz-bus-contentie (idem: vast aantal gaitstappen, dus geen vastloper, alleen uitgerekt in tijd — gebruiker bevestigde visueel "hij beweegt heel langzaam").
+
+**Resultaat:**
+
+| As | Range | Offset (hard-iron) | Schaal (soft-iron) |
+|---|---|---|---|
+| x | 39,15 | -7,575 | 0,727 |
+| y | 36,15 | 22,575 | 0,787 |
+| z | 10,05 (te klein, schaal overgeslagen) | 74,775 | 1,000 |
+
+Verwerkt in `imu_publisher.py` als `MAG_OFFSET`/`MAG_SCALE`-constanten, toegepast op de ruwe magnetometerwaarden vóór de as-remap/tilt-compensatie. Volledig resultaat: `/root/logs/mag_calibration_result.json`.
+
+### Validatie: `MAG_GAIN` terug naar 0,01 (correctie AAN) — probleem opgelost, geen workaround meer nodig
+
+| | STM32 | Extern (gekalibreerd, MAG_GAIN=0,01) | Afwijking |
+|---|---|---|---|
+| Links | +52,56° | +52,49° | 0,13% |
+| Rechts | -53,69° | -52,59° | 2,05% |
+
+Gecombineerde manoeuvre (`F,U,F,L`) ter bevestiging herhaald:
+
+| Bron | Gemeten delta |
+|---|---|
+| STM32 | -147,37° |
+| Extern (gekalibreerd) | -149,76° |
+| RF2O | -146,34° |
+
+Spreiding van 3,4° tussen alle drie, ook door een complexere manoeuvre heen. **Dit is een echte fix, geen workaround** — de magnetometer-correctie staat weer aan, dus de langetermijn-drift-correctie is niet meer opgeofferd voor rotatienauwkeurigheid.
+
+### Definitieve root cause
+Twee samenwerkende factoren, geen van beide alleen voldoende:
+1. **Dynamische interferentie** door nabijheid van het voedingsbord/de XT30-connector (servo-stroom-afhankelijk) — verholpen door fysieke verplaatsing.
+2. **Statische hard-iron-afwijking**, nooit gekalibreerd — verholpen door `mag_calibration.py`.
+
+De as-remap (het oorspronkelijke verdachte uit de docstring) bleek na verificatie tegen het officiële datasheet correct.
 
 ---
 

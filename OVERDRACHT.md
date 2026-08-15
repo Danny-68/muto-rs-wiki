@@ -1,51 +1,49 @@
 # 🔄 Overdracht — lees dit eerst in een nieuwe sessie
 
-**Laatst bijgewerkt:** 15 augustus 2026 (avond, na de karakteriseringssessie)
-**Volledige details:** [docs/ROADMAP.md](docs/ROADMAP.md) secties "🎯 Planningssessie 15 augustus 2026" en "✅ Uitvoering 15 augustus 2026"
+**Laatst bijgewerkt:** 15 augustus 2026 (avond, sessie afgesloten)
+**Volledige details:** [docs/ROADMAP.md](docs/ROADMAP.md) secties "🎯 Planningssessie", "✅ Uitvoering" en "✅ Vervolg (avond)" — alle drie 15 augustus 2026
 
 ---
 
 ## Waar we nu staan (in één alinea)
 
-De externe ICM20948 is opnieuw aangesloten en werkt weer (magnetometer-timeout weg, `/imu` stabiel op 20Hz). `ekf_params.yaml` (Pad A) stond in de container al onveranderd correct. Een nieuw testscript ([`combi_calibration_test.py`](combi_calibration_test.py)) is gebouwd en gedraaid over vijf fases: stationary, STM32-Hz-bus-contentie, afstandskalibratie vooruit/achteruit, rotatiekalibratie, en een gecombineerde manoeuvre. **Belangrijkste bevinding: de externe IMU is bij actieve rotatie in BEIDE richtingen onbetrouwbaar** (niet alleen linksom, zoals de 14-augustus-overdracht meldde) — root cause voorlopig gevonden en omzeild via `MAG_GAIN=0.0` in `imu_publisher.py` (magnetometer-correctie uit, zuivere gyro-integratie). Dat is bevestigd in beide rotatierichtingen én tijdens een complexere gecombineerde manoeuvre (180°-draai + vooruit + kleine draai, alle drie sensoren binnen ~4° van elkaar).
+**De externe-IMU-rotatiebug is opgelost, geen workaround meer.** Root cause: twee samenwerkende factoren — dynamische interferentie door nabijheid van het voedingsbord/de XT30-connector (verholpen door fysieke verplaatsing van de sensor), en een nooit-gekalibreerde hard-iron-afwijking (verholpen door een nieuwe magnetometer-kalibratie, `mag_calibration.py`). De magnetometer-as-remap, aanvankelijk verdacht, bleek na verificatie tegen het officiële ICM-20948-datasheet correct. `MAG_GAIN` staat weer op de originele 0,01 (correctie AAN) — gevalideerd tot binnen 0,1-2,1% van STM32/RF2O in beide rotatierichtingen én tijdens een complexere gecombineerde manoeuvre (180°-draai + vooruit + partiële draai, alle drie sensoren binnen 3,4° van elkaar).
 
-**⚠️ Dit is een workaround, geen fix.** Zonder magnetometer-correctie is er geen absolute-heading-referentie meer — puur gyro-integratie zal over langere missies wegdrijven. De onderliggende as-remap-bug (nooit geverifieerd, al gevlagd in `imu_publisher.py`'s eigen docstring) is nog niet root-oorzakelijk gevonden.
+**Ook afgerond deze sessie:** `MAX_LINEAR_SPEED_MPS` in `phoenix_driver.py` bevestigd correct (geen update nodig ondanks twee gait-wijzigingen sinds de laatste meting); RF2O x/y blijkt consistent ~6-7% te onderschatten (mogelijk met vaste factor te corrigeren); STM32-Hz-bus-contentie gekwantificeerd (2Hz kost nog steeds +87,8% overhead).
 
 ---
 
 ## Direct te doen, in deze volgorde
 
-1. **Bevestig dat `MAG_GAIN=0.0` nog steeds staat** in `imu_publisher.py` (zowel host `/home/pi/` als container `/root/`) — dit is een bewuste, tijdelijke keuze, geen abusievelijke wijziging. Backup van de originele waarde (0,01): `imu_publisher.py.bak_20260815_maggaintest`.
-2. **As-remap-root-cause onderzoeken** (nu dat de workaround bevestigd werkt, is dit niet meer urgent-blokkerend, maar wel nog open): magnetometer-as-remap in `imu_publisher.py` verifiëren tegen het ICM20948-datasheet (Figuur 12/13), zoals de docstring zelf al aangeeft nooit gedaan te zijn. Doel: magnetometer-correctie weer veilig aan kunnen zetten, zodat langetermijn-yaw-drift weer gecorrigeerd wordt.
-3. **`robot_bridge.py`'s `SPEED_TABLE`/`STEP_DISTANCE_M` nog steeds niet vernieuwd** — de vandaag gedane afstandskalibratie (bevestigde `MAX_LINEAR_SPEED_MPS` in `phoenix_driver.py`) geldt voor een ander bewegingspad (`phoenix_gait.py`/Nav2), niet voor de STM32-firmware-gait die `robot_bridge.py`/Dify/spraak gebruikt. Als dat pad ook gebruikt wordt, moet het apart gekalibreerd worden met dezelfde methode.
-4. **RF2O x/y-correctiefactor overwegen (~1,068×)** — RF2O onderschat consistent ~6-7% in beide richtingen (n=2, dus nog een voorlopig signaal, meer reps zouden dit steviger maken). In tegenstelling tot yaw (teken-wisselende fout, niet met vaste factor te repareren) lijkt dit wél met een vaste schaalcorrectie op te lossen.
-5. **Residual-gate-node en stop-and-correct-navigatielus nog niet gebouwd** — vandaag leverde alleen de karakteriseringsdata die daarvoor nodig is (zie ROADMAP.md A/C).
-6. **STM32-Hz-bus-contentie blijft bestaan, ook bij de huidige 2Hz-instelling** (+87,8% wall-clock-overhead, gemeten en bevestigd) — geen actie ondernomen, alleen gekwantificeerd. Plafond op ~3,4Hz werkelijk haalbare rate, ongeacht gevraagde rate.
-7. **180°-laser-TF-fix blijft elke sessie checken** (container-lokale `sed`-aanpassing, niet persistent) — ongewijzigd advies uit eerdere sessies.
+1. **Fysieke montagepositie van de externe IMU niet meer wijzigen** zonder de rotatietest te herhalen — de huidige positie + kalibratie is gevalideerd, maar de kalibratiewaarden (`MAG_OFFSET`/`MAG_SCALE` in `imu_publisher.py`) zijn positie-specifiek. Een nieuwe verplaatsing vereist een nieuwe `mag_calibration.py`-run.
+2. **`robot_bridge.py`'s `SPEED_TABLE`/`STEP_DISTANCE_M`** — nog steeds niet vernieuwd. Ander bewegingspad (STM32-firmware-gait via `muto_driver_fixed.py`, gebruikt door Dify/spraak/HTTP) dan wat vandaag gekalibreerd is (`phoenix_gait.py`/Nav2-pad). Alleen relevant als dat pad ook gebruikt wordt.
+3. **RF2O x/y-correctiefactor overwegen (~1,068×)** — n=2 richtingen, sterk maar nog voorlopig signaal.
+4. **Residual-gate-node en stop-and-correct-navigatielus nog niet gebouwd** — de karakteriseringsdata daarvoor is nu wel compleet (zie ROADMAP.md secties A/C van de planningssessie).
+5. **STM32-Hz-bus-contentie blijft bestaan, ook bij 2Hz** (+87,8% wall-clock-overhead, plafond ~3,4Hz werkelijk haalbare rate) — geen actie ondernomen, alleen gekwantificeerd.
+6. **180°-laser-TF-fix blijft elke sessie checken** (container-lokale `sed`-aanpassing, niet persistent).
 
 ---
 
 ## Openstaande bugs (nog niet gefixt)
 
-- **Nav2 `NavigateToPose` liep veel verder dan het doel** (30cm werd >50cm, 17 recoveries, 14 aug) — root cause nog onbekend, nog te onderzoeken via `/tmp/nav2.log` en de costmap-configuratie. Vandaag niet aangeraakt.
-- **`phoenix_driver.py` kan stil crashen** (geen traceback/OOM/USB-disconnect zichtbaar, 14 aug) — reden onbekend. Vandaag niet aangeraakt, blijft open.
-- **As-remap-bug in `imu_publisher.py`'s magnetometer-fusie** (nieuw vandaag) — root cause nog niet gevonden, alleen omzeild via `MAG_GAIN=0.0`. Zie "Direct te doen" punt 2.
+- **Nav2 `NavigateToPose` liep veel verder dan het doel** (30cm werd >50cm, 17 recoveries, 14 aug) — vandaag niet aangeraakt.
+- **`phoenix_driver.py` kan stil crashen** (14 aug) — vandaag niet aangeraakt.
 
 ---
 
 ## Bewust uitgesteld (lagere prioriteit, met reden)
 
-- **Zijwaartse drift tijdens recht-vooruit-lopen** — ongewijzigd, nog niet herzien.
+- **Zijwaartse drift tijdens recht-vooruit-lopen** — ongewijzigd.
 - **Pad B (zachte gait-variant)** — on hold, ongewijzigd.
-- **Astra Pro Plus + ICP-pointcloud-odometrie** — blijft geparkeerd. Vandaag is bovendien gebleken dat RF2O x/y met een simpele schaalcorrectie waarschijnlijk goed genoeg is (~6-7% consistente onderschatting, geen chaotische fout) — nog minder reden om een extra sensor toe te voegen dan eerder gedacht.
+- **Astra Pro Plus + ICP-pointcloud-odometrie** — blijft geparkeerd. Met zowel de externe-IMU-rotatie als RF2O x/y nu redelijk goed gekarakteriseerd (en beide bruikbaar, eventueel met een simpele correctiefactor voor RF2O), is de noodzaak voor een extra sensor verder afgenomen.
 
 ---
 
 ## Belangrijke, blijvende lessen uit deze sessie (15 augustus 2026)
 
-- **Een aanname over "we gebruiken de magnetometer niet" bleek onjuist te zijn tot we de code echt narekenden** — `MAG_GAIN` stond op 0,01 (klein maar niet nul). De 11-augustus-fix voor magnetometerinterferentie was fysiek (IMU verplaatst), nooit software-matig (`MAG_GAIN` is toen niet aangepast). Twee verschillende fixes voor mogelijk hetzelfde soort probleem, niet met elkaar verward moeten worden — check de code, vertrouw niet op wat je denkt dat er nog staat.
-- **Een yaw-representatie begrensd tot ±180° vereist een wrap-gecorrigeerde aftrekking voor elke delta-berekening** — een kale `after - before` gaf een keer -304,98° i.p.v. de werkelijke +55,02°. Geldt voor élke hoekmeting in dit project, niet alleen deze ene test.
-- **Bij een polling-loop die "elke N seconden iets doet" tijdens een tijd-kritische lus: plan het volgende moment altijd relatief aan nu (`time.monotonic() + interval`), nooit cumulatief vanaf een vast schema (`volgende += interval`)** — bij de laatste blijft de klok voorgoed achterlopen zodra één iteratie langer duurt dan het interval, met een op-hol-geslagen lus tot gevolg.
-- **Consistente, richtingsonafhankelijke fouten (RF2O-onderschatting) zijn met een vaste factor te repareren; teken-wisselende/richtingsafhankelijke fouten (yaw bij oude rf2o, nu ook de externe-IMU-rotatiebug) meestal niet** — dat onderscheid bepaalt of "gewoon een correctiefactor toepassen" een zinnige aanpak is.
-- **Fysieke plaatsing verifiëren vóórdat je een probleem aan interferentie toeschrijft** — de gebruiker bevestigde dat de externe IMU al in de verhoogde/geïsoleerde positie zat, wat de eerdere "waarschijnlijk hetzelfde oude interferentieprobleem"-hypothese minder aannemelijk maakte en de softwarebug-hypothese sterker.
-- (Blijft gelden, uit eerdere sessies) **Nooit een lange, blinde rotatieduur commanderen** op basis van een niet-gevalideerde snelheid; **wachttijden altijd met `time.sleep()`**; **minimaal ~24-27 seconden wachten na elke stop** voor een betrouwbare yaw/pose-meting; **code op de Pi-host kan afwijken van wat er in de container draait — altijd de container-kopie checken** (bevestigd nogmaals vandaag bij de EKF-config-check).
+- **Een fysiek probleem kan zich als een softwarebug voordoen, en andersom — verifieer beide kanten voordat je concludeert.** De as-remap leek de meest waarschijnlijke oorzaak (stond al als verdacht in de docstring), maar bleek na daadwerkelijke verificatie tegen het datasheet correct; de echte oorzaak was een combinatie van montage-plaatsing (hardware) en ontbrekende kalibratie (software/proces). Beide moesten worden aangepakt — geen van beide alleen was genoeg.
+- **Bij twijfel over een fysieke oorzaak: vraag om foto's van de daadwerkelijke montage.** De aanname "IMU zit al in de geïsoleerde positie van 11 augustus" bleek onjuist zodra er foto's kwamen — de sensor zat vlak boven het voedingsbord. Een verbale bevestiging ("ja, verhoogde positie") was niet betrouwbaar genoeg voor deze diagnose.
+- **Foutpatronen zijn diagnostisch: chaotisch/teken-wisselend wijst op dynamische storing, consistent/richtingsonafhankelijk op statische storing.** Dat onderscheid hielp bepalen welke van de twee fixes (verplaatsen vs. kalibreren) op welk moment het meest opleverde.
+- **Reken een fysieke hypothese (zoals off-axis-centripetale versnelling) na met echte getallen voordat je hem serieus neemt of verwerpt.** Een plausibel klinkend mechanisme bleek bij dit tempo/deze montage-afstand drie ordes van grootte te klein om de waargenomen fout te verklaren — een korte berekening voorkwam een verkeerd spoor.
+- **Een polling-loop die "wacht tot data klaar is" (zoals `read_magnetometer_data(timeout=1.0)`) kan een vast-aantal-stappen-lus enorm uitrekken in wall-clock-tijd, zonder dat het een vastloper is.** Zelfde patroon als de STM32-Hz-bevinding eerder vandaag — bij twijfel: `etimes` van het proces checken (stijgt het nog?) i.p.v. aannemen dat het vastzit.
+- (Blijft gelden, uit eerdere sessies) Altijd de daadwerkelijk actieve config/hardware-status verifiëren voordat je op een eerdere sessie's aannames voortbouwt; code op de Pi-host kan afwijken van de container; minimaal ~24-27s wachten na een stop voor een betrouwbare yaw/pose-meting.
