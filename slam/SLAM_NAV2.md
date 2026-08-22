@@ -28,11 +28,33 @@ ros2 launch hexapod_nav hexapod_navigation.launch.py \
 | `muto_driver_fixed.py` v5/v6 | Combineert **altijd** x/y/z in één `move()`-aanroep | Voorkomt dat rotatie de voorwaartse snelheid wegkaapt (zie PROBLEMS.md) |
 
 ### AMCL-lokalisatieprocedure (zonder Foxglove-kennis nodig)
+0. **Beweging is verplicht, wachten alleen is niet genoeg** (bevestigd 21 aug
+   2026): AMCL's update-stap wordt gepoort door `update_min_d`/`update_min_a`
+   — die vuurt alleen bij beweging, niet bij tijd. Na een volledige
+   `/reinitialize_global_localization` bleef de covariantie na 15s
+   **stilstaand** wachten enorm (positie-variantie x≈70, y≈414,
+   yaw≈8,3 rad²). Sla stap 1 dus nooit over in de veronderstelling dat
+   passief wachten voldoende is.
 1. `ros2 service call /reinitialize_global_localization std_srvs/srv/Empty '{}'`
 2. Gedoseerde rotatie-bursts sturen (`angular.z=0.25`, ~2s, met stop erna) — kleiner dan `update_min_a: 0.2 rad` (~11.5°) geeft géén nieuwe AMCL-schatting, dus bursts ruim daarboven houden.
-3. Positie convergeert meestal vlot; **yaw convergeert soms niet vanzelf** (lokale kaartsymmetrie of rf2o-onbetrouwbaarheid).
+3. Positie convergeert meestal vlot **zodra er beweging is geweest**; **yaw convergeert soms niet vanzelf** (lokale kaartsymmetrie of rf2o-onbetrouwbaarheid) — zie het AprilTag-besluit in ROADMAP.md (21 aug) voor de structurele aanpak hiervan.
 4. Bij vastlopende yaw: gemarkeerde kaartafbeelding genereren (rode stip+pijl op AMCL-schatting) en de gebruiker een koerscorrectie laten inschatten → als nieuwe, striktere `/initialpose`-prior toepassen.
 5. **Verificatie:** live `/scan_fixed` op 0°/90°/180°/270° vergelijken met een raycast tegen de `.pgm`-kaart vanaf de huidige AMCL-pose — grote afwijkingen op meerdere richtingen = echte lokalisatiefout.
+
+### Voorkant-conventie voor weergave/verificatie (sinds 21 aug 2026)
+`base_link`'s eigen URDF +x-as wijst structureel naar de fysieke
+**achterkant** van de robot (vast, 180°, onafhankelijk van AMCL/de kaart —
+bevestigd via `/home/pi/front_scan_check.py`, een kaart/AMCL-vrije test die
+alleen de vaste laser→base_link-montagetransform gebruikt). Dit is dus geen
+AMCL- of omgevingsprobleem, maar een chassis/URDF-modelleerkeuze; de URDF
+zelf aanpassen is te riskant (alle pootgewrichten + camera zijn relatief aan
+`base_link` gedefinieerd). In plaats daarvan: **`/home/pi/muto_front_convention.py`**
+is de enige bron van waarheid (`FRONT_YAW_OFFSET_DEG = 180.0`) — elk script
+dat de fysieke voorkant toont of gebruikt (`front_scan_check.py`,
+`lidar_overlay.py`, `verify_amcl_pose.py`) importeert deze, in plaats van
+een eigen kopie te hardcoden. De yaw die naar AMCL/Nav2/EKF gaat blijft
+ongewijzigd in `base_link`'s eigen conventie — dit raakt alleen
+mens-leesbare weergave/verificatie.
 
 ### Precisiebeweging (geen Nav2, directe STM32-aansturing)
 Voor kleine, nauwkeurige stappen (bijv. door een deuropening) is `robot_bridge.py` (Flask, port 5000) betrouwbaarder dan Nav2/`cmd_vel`-bursts:

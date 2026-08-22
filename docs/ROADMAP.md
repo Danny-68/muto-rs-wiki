@@ -4,6 +4,125 @@ Overkoepelend statusoverzicht van de grote visie: een volledig autonome, natuurl
 
 ---
 
+## 🧭 Vervolg 21 augustus 2026 — AMCL-tuning gestaakt, AprilTag-besluit, structurele voorkant-conventiefout gevonden en gecentraliseerd
+
+### Kernprobleem eindelijk erkend als fundamenteel, niet tuning
+Na maanden herhaalde AMCL-mislukkingen (zie 16 aug hieronder) werd expliciet
+erkend: pure LiDAR scan-matching (AMCL, `slam_toolbox` zou hetzelfde
+probleem hebben) kan een symmetrische/rechte gang structureel niet
+oplossen — een eigenschap van de methode, geen parameter- of sensorfout.
+Verder AMCL-tunen is gestaakt als primaire aanpak.
+
+### Besluit: AprilTag + Astra-camera als absoluut lokalisatie-anker
+Gekozen boven een simpele fysieke marker, omdat een deterministische
+oplossing gewenst was, geen kansafhankelijke. Volledige grondoorzaken-
+analyse en 8-fasen stappenplan: **Muto Lokalisatie Routekaart**,
+https://claude.ai/code/artifact/10f95581-291a-4066-ad52-023ef76f3f2a.
+`ros-humble-apriltag-ros` geverifieerd beschikbaar via apt in `humble_run`
+(alleen `apriltag-msgs` stond al geïnstalleerd, de detector nog niet).
+
+### Nieuwe, losse bevinding: structurele voorkant-conventiefout in de URDF
+Tijdens het diagnosticeren kwam een tweede, apart probleem naar boven: de
+gebruiker merkte terecht op dat de voorkant-pijl in `lidar_overlay.py` vaak
+niet klopte met de fysieke werkelijkheid. Gebouwd: `front_scan_check.py` —
+een test die de live LiDAR-scan puur in `base_link`'s eigen frame tekent,
+**zonder kaart en zonder AMCL-pose** (alleen de fysiek vaste, al
+geverifieerde laser-montage-transform uit `Muto.urdf`'s `LD_Joint` +
+`laser_scan_fix_joint`). Direct door de gebruiker bevestigd: `base_link`'s
+eigen +x-as (URDF-conventie, gebruikt door AMCL/Nav2/EKF) wijst naar de
+fysieke **achterkant** van de robot — een vaste 180°, reproduceerbaar zonder
+enige afhankelijkheid van AMCL of de kaart. Dit is dus **los van en
+aanvullend op** de gang-symmetrie-ambiguïteit hierboven, niet dezelfde
+oorzaak. (De eerdere 15-aug-notitie "180°-hypothese vereist wijziging in
+`laser_scan_fix_joint`" bleek de verkeerde plek te wijzen aan — het zit in
+hoe `base_link` zelf t.o.v. de chassis-mesh gedefinieerd is, niet in de
+laser-montage, die al correct was.)
+
+De URDF zelf aanpassen (base_link's +x omdraaien) is te riskant afgewezen:
+`camera_Joint`, `LD_Joint` en alle pootgewrichten zijn relatief aan
+`base_link` gedefinieerd, dus dat zou elk kind-gewricht opnieuw moeten
+herijken en kan de al-werkende rijrichting/camerapositie breken.
+
+**In plaats daarvan:** één centrale bron van waarheid gebouwd,
+`/home/pi/muto_front_convention.py` (`FRONT_YAW_OFFSET_DEG = 180.0` + een
+helper-functie), en alle drie de weergave/verificatie-scripts
+(`front_scan_check.py`, `lidar_overlay.py`, `verify_amcl_pose.py`) daarop
+aangesloten — expliciet gevraagd door de gebruiker nadat bleek dat de oude,
+losse correctie (alleen in `lidar_overlay.py`) stilzwijgend verloren ging
+toen dat ene script werd aangepast: "ik wil dat kijk richting en lidar scan
+een zijn en geen twee variabelen." Bij het consolideren bleek
+`verify_amcl_pose.py` exact hetzelfde risico te hebben: de ruwe-scan-index-
+opzoek paste de `-180`-correctie al (stilzwijgend) toe, de wereldhoek-regel
+ernaast niet — gefixt door beide via dezelfde, eenmalige
+`base_link_rel_deg`-berekening te laten lopen.
+
+**Verificatiestatus:** alleen `front_scan_check.py` is door de gebruiker
+zelf live bevestigd. `lidar_overlay.py` en `verify_amcl_pose.py` volgen nu
+hetzelfde geverifieerde patroon, maar zijn nog niet apart live opnieuw
+getest — dat vereist een echt geconvergeerde AMCL-pose.
+
+### Nieuwe operationele bevinding: AMCL convergeert nooit stilstaand vanuit een volledige reset
+Na `/reinitialize_global_localization` en 15s **stilstaand** wachten bleef
+de covariantie enorm (positie-variantie x≈70, y≈414, yaw≈8,3 rad²) — geen
+convergentie, ongeacht hoe lang gewacht wordt. Verklaring: AMCL's
+update-stap wordt gepoort door `update_min_d`/`update_min_a` — die vuurt
+alleen bij **beweging**, niet bij tijd. Dit is geen project-specifieke bug
+maar een fundamentele eigenschap van Monte Carlo Localization; elke
+serieuze MCL-implementatie lost de "kidnapped robot"-situatie op met een
+kleine, gecontroleerde beweging (rotatie ter plekke), nooit door langer te
+wachten. Bevestigt waarom de bestaande `wake_and_localize.py`-procedure
+(rotatie+verplaatsing-sequentie) nodig blijft voor echte kaart-lokalisatie —
+de nieuwe `front_scan_check.py`-aanpak is specifiek voor **stilstaande**
+voorkant-conventieverificatie, niet voor kaartpositie-bepaling.
+
+### Openstaand na vanavond
+1. `lidar_overlay.py` en `verify_amcl_pose.py` los live verifiëren zodra
+   AMCL daadwerkelijk convergeert (vereist beweging + expliciete
+   toestemming vooraf).
+2. Fase 1 van de AprilTag-routekaart (software voorbereiden).
+3. De al langer staande beslissing (16 aug, hieronder) om de kaart opnieuw
+   op te nemen — nu logisch te combineren met Fase 6 van de routekaart
+   (tag zichtbaar tijdens opname).
+
+---
+
+## ⚠️ Vervolg 16 augustus 2026 — AMCL-parameteranalyse, spiegel-flip-probleem geïdentificeerd en deels opgevangen, besluit: kaart opnieuw opnemen
+
+> Deze sectie was in de sessie van 16 augustus zelf al opgesteld maar nooit
+> gecommit/gepusht (werkdirectory ging verloren voor het zover kwam).
+> Gereconstrueerd op 21 augustus uit het sessietranscript, inhoudelijk
+> ongewijzigd t.o.v. wat toen al klaarstond.
+
+### AMCL-parameteranalyse en -fixes (`hexapod_nav_params.yaml`)
+- `motion_model_type: "nav2_amcl::OmniMotionModel"` → hernoemd naar de
+  correcte parameternaam `robot_model_type: "nav2_amcl::DifferentialMotionModel"`
+  (de oude naam werd stilzwijgend genegeerd door AMCL, die toch al op
+  Differential terugviel — dus een correctheidsfix, geen gedragswijziging).
+- `sigma_hit: 0.1` → `0.2`
+- `laser_likelihood_max_dist: 2.0` → `6.0`
+- `z_hit: 0.9` → `0.8` (verhelpt dat `z_hit+z_short+z_max+z_rand` optelde
+  tot 1.1 i.p.v. 1.0)
+- Backup: `hexapod_nav_params.yaml.bak_20260816_amcltuning`
+
+### `wake_and_localize.py` gebouwd
+Gestandaardiseerde "nooit een aangenomen positie"-opstartprocedure:
+globale herlokalisatie → rotatie+verplaatsing-disambiguatiesequentie →
+AMCL-pose + leeftijd ophalen → kruischeck tegen EKF/externe IMU →
+automatische correctie bij een vermoedelijke 180°-spiegel-flip (yaw-verschil
+met EKF > 120°) → hergebruikt bewust `lidar_overlay.py` en
+`verify_amcl_pose.py` i.p.v. logica te dupliceren. Onderweg een eigen
+parsing-bug gevonden en gefixt (`get_frame_yaw` pakte het verkeerde
+kwaternion-veld, `linear_acceleration.z` i.p.v. `orientation.z`).
+
+### Kernconclusie van die sessie (basis voor het 21-aug-besluit)
+De gang-symmetrie werd al herkend als een geometrisch/omgevingsprobleem
+i.p.v. een kaartkwaliteitsprobleem — de twee lange parallelle muren zijn
+echte, correct opgenomen gangmuren, geen ruis. Besluit destijds: **eerst
+een nieuwe kaart opnemen** voordat verder getest wordt — dat besluit staat
+nog steeds (zie "Openstaand na vanavond" hierboven).
+
+---
+
 ## ⚠️ Vervolg 15 augustus 2026 (diep in de nacht) — eerste geslaagde NavigateToPose, daarna een aanhoudend AMCL-betrouwbaarheidsprobleem, sessie geëindigd door een vastgelopen Muto + reboot
 
 Direct vervolg op de sectie hieronder (die eindigde met lokalisatie bevestigd goed, 0,11-0,17m afwijking, klaar voor een nieuwe `NavigateToPose`-poging). Dit werd een lange, leerzame maar uiteindelijk onopgeloste zoektocht. Alles hieronder in chronologische volgorde.

@@ -358,6 +358,17 @@ De twee fouten wijzen **tegengestelde kanten op** tussen bijna-identieke tests. 
 - **Oorzaak:** sporadisch trackingverlies van `rf2o`'s laser-scan-matching tijdens snel draaien (verschil varieerde 15°→95° tussen bijna-identieke tests — geen consistente schaalfout, dus incidenteel).
 - **Fix:** rotatiesnelheid verlagen (level 20 i.p.v. 30) verbeterde de afwijking van -49.6° naar -11.3° — gebruik level ≤20 voor rotatie in Nav2 (`rotate_to_heading_angular_vel`).
 
+### `base_link`'s URDF +x wijst naar de fysieke achterkant, niet de voorkant (21 aug 2026)
+- **Oorzaak:** chassis/URDF-modelleerkeuze in `Muto.urdf` — niets in ROS dwingt af dat de mesh-voorkant overeenkomt met de kinematische +x-as, en bij een hexapod (geen sturende wielas) is er geen natuurlijke dwang die dit forceert. Los van AMCL en de kaart: bevestigd via `/home/pi/front_scan_check.py`, een test die de live scan puur in `base_link`-frame tekent zonder kaart/AMCL-pose. Vaste 180°, niet situationeel.
+- **Waarom dit lang onopgemerkt bleef / steeds terugkwam:** eerdere fixes (zie oa. commit "180-voor/achter-weergavebug gefixt" en de `FRONT_DISPLAY_OFFSET_DEG`-hack van 14 aug) losten dit telkens lokaal, ongedocumenteerd, in precies één script op — waardoor het bij een latere aanpassing van dát script stilzwijgend weer verdween.
+- **Fix:** URDF zelf aanpassen is te riskant afgewezen (`camera_Joint`, `LD_Joint`, alle pootgewrichten zijn relatief aan `base_link` gedefinieerd). In plaats daarvan één centrale bron van waarheid: `/home/pi/muto_front_convention.py` (`FRONT_YAW_OFFSET_DEG = 180.0`), geïmporteerd door `front_scan_check.py`, `lidar_overlay.py` en `verify_amcl_pose.py`. Raakt alleen weergave/verificatie — de yaw naar AMCL/Nav2/EKF blijft in `base_link`'s eigen conventie.
+- **Bijvangst:** `verify_amcl_pose.py` had hetzelfde risico al concreet gerealiseerd — de ruwe-scan-index-opzoek paste een `-180`-correctie toe, de wereldhoek/raycast-regel ernaast niet. Gefixt door beide via één gedeelde `base_link_rel_deg`-berekening te laten lopen.
+
+### AMCL convergeert niet stilstaand vanuit een volledige reset, ongeacht wachttijd (21 aug 2026)
+- **Oorzaak:** geen bug — standaardgedrag van Monte Carlo Localization. `update_min_d`/`update_min_a` poorten AMCL's update-stap op *beweging*, niet op tijd; bij stilstand komt er geen nieuwe informatie binnen om de deeltjeswolk te laten convergeren.
+- **Waargenomen:** na `/reinitialize_global_localization` + 15s stilstaand wachten bleef de covariantie enorm (positie-variantie x≈70, y≈414, yaw≈8,3 rad²).
+- **Fix/mitigatie:** geen "fix" nodig — dit bevestigt waarom de bestaande rotatie+verplaatsing-disambiguatieprocedure (`wake_and_localize.py`, zie [SLAM_NAV2.md](../slam/SLAM_NAV2.md)) verplicht blijft voor echte kaartlokalisatie. Ga er nooit vanuit dat langer wachten zonder beweging alsnog convergeert.
+
 ---
 
 ## 🎯 Rotatie & precisiebeweging (`robot_bridge.py`)
