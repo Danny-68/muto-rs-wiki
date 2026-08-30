@@ -1,6 +1,6 @@
 # 🦾 Yahboom Muto RS — Project Naslagwerk
 
-> **Eigenaar:** Dan (Meinds) | **Robot:** Yahboom Muto RS (4ROS versie, Raspberry Pi 5)
+> **Eigenaar:** Dan (Mei) | **Robot:** Yahboom Muto RS (4ROS versie, Raspberry Pi 5)
 > **Doel:** Volledig autonoom, AI-aangestuurde hexapod met SLAM, Nav2, en Dify NLP-controle
 
 ---
