@@ -103,3 +103,18 @@ kaartlokalisatie.
 - (Blijft gelden) Code op de Pi-host/in een repo kan afwijken van wat er in
   de container draait; bestandswijzigingen overleven een reboot,
   proces-state niet.
+
+---
+
+## Let op: scripts die (nog) niet in deze repo staan
+
+Genoemd in de documentatie maar alleen op de Pi aanwezig: `muto_front_convention.py`,
+`front_scan_check.py`, `lidar_overlay.py`, `combi_calibration_test.py`,
+`mag_calibration.py`, `lidar_only_map.yaml`. Voeg ze toe aan `H_FILES` in
+`tools/upload.py` en draai dat script op de Pi.
+
+## Secrets
+
+WiFi-wachtwoord en Dify-API-key staan niet meer in de scripts maar komen uit de
+omgeving (`WIFI_PASSWORD`, `DIFY_API_KEY`, `GH_TOKEN`). De oude waarden staan nog
+in de git-historie: **roteer ze**.

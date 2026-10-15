@@ -5,7 +5,7 @@
 
 # 配置变量 / Configuration Variables
 WIFI_NAME="ORBI90"          # 目标WiFi网络名称 / Target WiFi network name
-WIFI_PASSWORD="orangefinch585"              # WiFi密码 / WiFi password
+WIFI_PASSWORD="${WIFI_PASSWORD:?Zet WIFI_PASSWORD in de omgeving, bv. WIFI_PASSWORD=... sudo -E bash connect_wifi.sh}"  # WiFi密码 / WiFi password (niet in de repo)
 INTERFACE="wlan0"             # 网络接口名称，根据系统调整 / Network interface name, adjust according to your system
 
 # 双语输出函数 / Bilingual output function

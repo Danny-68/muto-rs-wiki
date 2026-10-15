@@ -1,5 +1,5 @@
 import base64,json,urllib.request,urllib.error,subprocess,os,sys
-TOKEN=os.environ.get("GH_TOKEN") or (sys.argv[1] if len(sys.argv)>1 else "")
+TOKEN=os.environ.get("GH_TOKEN") or sys.exit("Zet GH_TOKEN in de omgeving (token niet als argument meegeven)")
 REPO="Danny-68/muto-rs-wiki"
 BASE="https://api.github.com"
 H={"Authorization":f"token {TOKEN}","Accept":"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"}

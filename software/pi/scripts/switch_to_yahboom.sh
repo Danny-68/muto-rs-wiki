@@ -124,7 +124,7 @@ docker run -it --rm \
     -v /home/pi/speech_music:/home/pi/speech_music \
     -v /home/pi/yahboomcar_ros2_ws:/root/yahboomcar_ros2_ws \
     -e DIFY_HOST=192.168.68.77 \
-    -e DIFY_API_KEY=app-f4CjDXcJX4VvnIqR34Z0LGM2 \
+    -e DIFY_API_KEY="${DIFY_API_KEY:?Zet DIFY_API_KEY in de omgeving}" \
     -e FORCE_VOICE_PROVIDER=alibaba \
     -e MUTO_ENABLE_VOICE=false \
     -e ROBOT_TYPE=Muto \
